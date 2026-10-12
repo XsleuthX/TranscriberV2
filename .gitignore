@@ -1,0 +1,25 @@
+node_modules
+dist
+.env
+.env.local
+public/models
+
+.test-temp
+.env.*
+!.env.example
+
+# Private media, project backups and generated artifacts
+*.wav
+*.mp3
+*.mp4
+*.mov
+*.m4a
+*.flac
+*.webm
+*.srt
+*.vtt
+*.transcriber.json
+*.zip
+*.log
+.DS_Store
+Thumbs.db

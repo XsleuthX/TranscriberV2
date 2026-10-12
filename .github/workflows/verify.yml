@@ -1,0 +1,44 @@
+name: Verify Transcriber
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Browser regression tests against production server
+        env:
+          BROWSER_CHANNEL: chromium
+          APP_URL: http://127.0.0.1:4173
+          PORT: '4173'
+        run: |
+          npm start > /tmp/transcriber-server.log 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" || true' EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent "$APP_URL/healthz" && break
+            sleep 1
+          done
+          npm run test:browser
+          npm run test:hosting-browser
+          npm run test:transcription-browser
+          npm run test:subtitle-quality-browser
+          npm run test:editing-browser
+          npm run test:review-browser
+          npm run test:story-review-browser
+          npm run test:assembly-browser
+      - name: Build deployment image
+        run: docker build -t transcriber:verified .
