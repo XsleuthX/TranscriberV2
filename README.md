@@ -1,4 +1,4 @@
-# Transcriber v2.36 - current DeepSeek API and responsive AI requests
+# Transcriber v2.36.1 - current DeepSeek API and container startup fix
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.

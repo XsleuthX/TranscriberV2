@@ -45,3 +45,11 @@ jobs:
           npm run test:assembly-browser
       - name: Build deployment image
         run: docker build -t transcriber:verified .
+      - name: Start and verify production container
+        run: |
+          container=$(docker run -d --name transcriber-smoke \
+            -e APP_ORIGIN=http://127.0.0.1:3000 \
+            -e APP_PASSWORD=ci-only-container-smoke-password \
+            transcriber:verified)
+          trap 'docker logs "$container"; docker rm -f "$container" >/dev/null' EXIT
+          docker exec -i "$container" node --input-type=module < tests/container-smoke.mjs
