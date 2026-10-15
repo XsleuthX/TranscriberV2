@@ -4,7 +4,7 @@ const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANN
 try {
  const page=await browser.newPage({viewport:{width:1600,height:1000}}),errors=[],api=[];
  page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/api/keys',r=>r.fulfill({json:{}}));
+ await page.route('**/api/keys',r=>r.fulfill({json:{anthropic:true}}));
  await page.route('**/api/ai',r=>{api.push('ai');return r.fulfill({status:500,json:{}});});
  await page.route('**/api/transcribe',r=>{api.push('transcribe');return r.fulfill({status:500,json:{}});});
  await page.goto(process.env.APP_URL||'http://localhost:4173');
@@ -25,8 +25,8 @@ try {
  await page.reload();await page.keyboard.press('F2');
  const bar=page.getByRole('toolbar',{name:'Subtitle vetting'}),undo=()=>page.getByRole('button',{name:/^Undo/}).first().click();
  const asset=async()=>(await read()).media.one;
- await bar.getByRole('button',{name:'Vet',exact:true}).click();
- await expect(bar.getByRole('button',{name:'Vet · 3 issues',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Vet',exact:true}).click();
+ await expect(bar.getByText('Vet · 3 issues',{exact:true})).toBeVisible();
  await bar.getByRole('button',{name:'Next issue',exact:true}).click();
  await expect(page.getByRole('dialog',{name:'Vet suggestion'})).toBeVisible();
  await expect(page.getByRole('dialog',{name:'Vet suggestion'}).locator('del')).toHaveText('favorite');
@@ -55,7 +55,7 @@ try {
  let settings=page.getByRole('dialog',{name:'Subtitle vet settings'});
  await settings.getByLabel('Chinese punctuation policy').selectOption('all');
  await settings.getByRole('button',{name:'Close vet dialog',exact:true}).click();
- await expect(bar.getByRole('button',{name:'Vet · 2 issues',exact:true})).toBeVisible();
+ await expect(bar.getByText('Vet · 2 issues',{exact:true})).toBeVisible();
  await bar.getByLabel('Issues only').check();
  await expect(page.getByLabel('Vetting issues').locator('del')).toHaveText(['，','。']);
  await page.getByLabel('Vetting issues').locator('.vet-card').first().getByRole('button',{name:'Open in editor',exact:true}).click();
@@ -70,7 +70,7 @@ try {
  await page.getByLabel('Vetting issues').locator('.vet-card').first().getByRole('button',{name:'Dismiss',exact:true}).click();
  await expect(page.getByLabel('Vetting issues').locator('.vet-card')).toHaveCount(1);
  await expect.poll(async()=>(await read()).vet.rules.length).toBe(1);await expect.poll(async()=>(await read()).vet.dismissed.length).toBe(1);
- await page.reload();await page.keyboard.press('F2');await bar.getByRole('button',{name:'Vet',exact:true}).click();
+ await page.reload();await page.keyboard.press('F2');await page.getByRole('button',{name:'Vet',exact:true}).click();
  await bar.getByLabel('Vet category').selectOption('team');await bar.getByLabel('Issues only').check();
  await expect(page.getByLabel('Vetting issues').locator('.vet-card')).toHaveCount(1);
  await page.screenshot({path:process.env.VET_SCREENSHOT||'.test-temp/subtitle-vet.png'});
@@ -82,5 +82,33 @@ try {
  await page.locator('.asset').filter({has:page.locator('b',{hasText:/^Source Two$/})}).click();
  await expect(page.getByLabel('Vetting issues').locator('.vet-card')).toHaveCount(0);expect((await asset()).cues[0].textOverride).toBe('My favourite colour.');
  expect(api).toEqual([]);expect(errors).toEqual([]);
- console.log('Vet browser checks passed: compact hints, apply/dismiss, bulk preview/Undo, A/B Dual isolation, Transcript synchronisation, protected punctuation, team notes/coverage, reload, report download, source isolation and no AI/transcription requests.');
+ await page.locator('.asset').filter({has:page.locator('b',{hasText:/^Source One$/})}).click();
+ await bar.getByLabel('Issues only').uncheck();
+ await bar.getByRole('button',{name:'Vet settings',exact:true}).click();settings=page.getByRole('dialog',{name:'Subtitle vet settings'});
+ await settings.getByRole('button',{name:'Team rules',exact:true}).click();
+ await settings.getByLabel('AI vet guidelines').fill('Retain Dr. Lotus and use concise British English.');
+ await settings.getByRole('button',{name:'Close vet dialog',exact:true}).click();
+ let request;
+ await page.route('**/api/ai',r=>{
+   const prompt=r.request().postDataJSON().messages[0].content;
+   request=prompt;const items=JSON.parse(prompt.split('PROJECT ITEMS:\n')[1]);
+   return r.fulfill({json:{content:[{type:'text',text:JSON.stringify({flags:[{target:items[0].target,reason:'Apply the team terminology in context.',suggestion:'My preferred colour.'}]})}]}});
+ });
+ await page.getByRole('button',{name:'Configure AI vet…',exact:true}).click();
+ await page.getByRole('button',{name:'Run',exact:true}).click();
+ await expect(page.getByLabel('AI review flags').getByRole('button',{name:'Apply suggestion',exact:true})).toBeVisible();
+ expect(request).toContain('Retain Dr. Lotus');expect(request).toContain('brand shade');expect(request).toContain('context');
+ await page.getByRole('button',{name:'Open Vet panel',exact:true}).click();
+ const aiFlags=page.getByLabel('Vet AI suggestions');
+ await aiFlags.getByRole('button',{name:'Apply suggestion',exact:true}).click();
+ await expect.poll(async()=>(await asset()).cues[0].textOverride).toBe('My preferred colour.');
+ expect((await asset()).words.map(w=>w.t).join(' ')).toContain('My preferred colour.');
+ expect((await read()).rows).toEqual(fixture.rows);
+ await undo();await expect.poll(async()=>(await asset()).cues[0].textOverride).toBe('My favourite colour.');
+ await bar.getByRole('button',{name:'Vet settings',exact:true}).click();settings=page.getByRole('dialog',{name:'Subtitle vet settings'});
+ await settings.getByRole('button',{name:'Team rules',exact:true}).click();await settings.getByLabel('AI vet guidelines').fill('A revised team policy');
+ await settings.getByRole('button',{name:'Close vet dialog',exact:true}).click();
+ await expect(aiFlags.getByRole('button',{name:'Apply suggestion',exact:true})).toBeDisabled();
+ expect(errors).toEqual([]);
+ console.log('Vet browser checks passed: compact hints, apply/dismiss, bulk preview/Undo, A/B Dual isolation, Transcript synchronisation, protected punctuation, team notes/coverage, reload, report download, source isolation, local checks without requests, and mocked contextual AI vet/policy staleness.');
 } finally {await browser.close();}

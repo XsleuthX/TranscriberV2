@@ -46,6 +46,8 @@ try {
     const db = await new Promise(r => { const req = indexedDB.open('transcriber', 1); req.onsuccess = () => r(req.result); });
     const value = await new Promise(r => { const req = db.transaction('projects').objectStore('projects').get('current'); req.onsuccess = () => r(req.result); }); db.close(); return value;
   });
+  await page.getByRole('button',{name:'Find',exact:true}).click();
+  await page.getByRole('button',{name:'Replace…',exact:true}).click();
   const find = page.getByLabel('Find text'), replacement = page.getByLabel('Replace with');
   const selectMedia = name => page.locator('.asset').filter({ has: page.locator('b', { hasText: new RegExp(`^${name}$`) }) }).click();
   const track = page.locator('.barsel[title="Which subtitle track this view reads and writes"]');

@@ -14,10 +14,12 @@ export function reviewTargets(preset, doc, activeAsset, context, cueText, cueTim
   const cueItems = (key, tracks) => tracks.forEach(track => {
     const own = doc.media[key]; if (!own) return;
     const counterpart = track === 'B' ? own.cues || [] : own.cuesB || [];
-    (track === 'B' ? own.cuesB || [] : own.cues || []).forEach(c => {
+    const list=track === 'B' ? own.cuesB || [] : own.cues || [];
+    list.forEach((c,index) => {
       const timing = cueTime(c, own.words || []);
-      const paired = counterpart.find(q => q.id.replace(/_B$/, '') === c.id.replace(/_B$/, '')) || counterpart.find(q => { const t = cueTime(q, own.words || []); return t.end > timing.start && t.start < timing.end; });
-      add({ kind: 'cue', assetKey: key, sourceName: own.name, track, id: c.id, pairedText: paired ? cueText(paired, own.words || []) : undefined,
+      const paired = counterpart.filter(q => {const t=cueTime(q,own.words||[]);return t.end>timing.start&&t.start<timing.end;});
+      add({ kind: 'cue', assetKey: key, sourceName: own.name, track, id: c.id, pairedText: paired.length ? paired.map(q=>cueText(q,own.words||[])).join('\n') : undefined,
+        context:list.slice(Math.max(0,index-2),index+3).map(q=>cueText(q,own.words||[])).join('\n').slice(0,4000),
         text: cueText(c, own.words || []), ...timing, ws: c.ws, we: c.we, suspect: !!c.suspect });
     });
   });

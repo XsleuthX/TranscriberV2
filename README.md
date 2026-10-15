@@ -1,4 +1,4 @@
-# Transcriber v2.34 - integrated subtitle vetting
+# Transcriber v2.35 - compact vetting and complete transcript copy
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
@@ -371,3 +371,9 @@ The archive excludes credentials, node_modules, and test media.
 
 API references: https://app.iconik.io/docs/authentication.html and
 https://app.iconik.io/docs/apidocs.html?url=/docs/files/spec/ .
+# Editing tools in v2.35
+
+Transcript and Subtitle modes have compact **Find** and **Vet** toolbar buttons. Find (Ctrl/Cmd+F) expands a search strip; **Replace…** reveals replacement controls. Vet opens the right panel for local suggestions and team rules. **Vet settings → Team rules** also saves contextual AI guidelines. **Configure AI vet…** uses the existing DeepSeek, OpenAI or Claude settings; review and approve suggestions individually. AI reviews include nearby and paired subtitle context, support cancellation, and reject stale suggestions after text or policy changes. Freeform AI chat remains available.
+
+**Copy transcript** copies the complete active transcript from project data, including offscreen paragraphs. Ctrl/Cmd+A then Ctrl/Cmd+C does the same when outside text editors. There is no application character cap. **Download transcript TXT** saves the complete text when clipboard access is unavailable. Native selection within editable fields remains unchanged.
+

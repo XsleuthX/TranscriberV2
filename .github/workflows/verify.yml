@@ -37,6 +37,7 @@ jobs:
           npm run test:transcription-browser
           npm run test:subtitle-quality-browser
           npm run test:subtitle-vet-browser
+          npm run test:transcript-copy-browser
           npm run test:editing-browser
           npm run test:review-browser
           npm run test:story-review-browser

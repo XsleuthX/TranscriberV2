@@ -3,12 +3,14 @@ import { timedText, replaceTimedWords } from './text-replace.js';
 export { parseComments };
 export const emptyVet = () => ({ options:{uk:true,chinese:'off',contextual:false},rules:[],dismissed:[],log:[],notes:[] });
 export const vetState = doc => ({...emptyVet(),...(doc.vet||{}),options:{...emptyVet().options,...doc.vet?.options}});
+export const vetPolicy = doc => {const v=vetState(doc);return JSON.stringify({options:v.options,rules:v.rules.filter(r=>r.enabled),notes:v.notes,guidelines:v.guidelines||''});};
 export async function subtitleFileText(file) {
   const bytes=new Uint8Array(await file.arrayBuffer());
   const encoding=bytes[0]===255&&bytes[1]===254?'utf-16le':bytes[0]===254&&bytes[1]===255?'utf-16be':'utf-8';
   return new TextDecoder(encoding,{fatal:true}).decode(bytes);
 }
 export function validVet(value) {
+  if(value?.guidelines!==undefined&&(typeof value.guidelines!=='string'||value.guidelines.length>32000))return false;
   if(!value || typeof value!=='object' || !value.options || typeof value.options.uk!=='boolean' || typeof value.options.contextual!=='boolean' || !['off','cjk','all'].includes(value.options.chinese)) return false;
   if(!Array.isArray(value.rules)||value.rules.length>1000||!Array.isArray(value.dismissed)||value.dismissed.length>10000||value.dismissed.some(v=>typeof v!=='string') || !Array.isArray(value.log)||value.log.length>500||!Array.isArray(value.notes)||value.notes.some(n=>typeof n!=='string'))return false;
   if(value.rules.some(r=>!r || typeof r.id!=='string' || !r.id || typeof r.from!=='string' || !r.from || typeof r.to!=='string' || typeof r.note!=='string' || ['caseSensitive','wholeWord','preserveCase','enabled'].some(k=>typeof r[k]!=='boolean')))return false;
@@ -61,11 +63,27 @@ export function applyVet(doc,issues,cueText,cueTime) {
     const result=applyIssues(scratch,flags.map(i=>({...i,cue:i.cueId,start:i.offset,end:i.limit,kind:i.kindOfCheck})));
     conflicts.push(...result.conflicts); if(!result.changes.length)continue;
     const after=scratch.cues[0].current, range=cueTime(c,asset.words||[]);
+    let next;
+    try { next=replaceVetCue(asset,c.id,f.track,after,cueText,cueTime); }
+    catch {conflicts.push(...flags);continue;}
+    media[f.assetKey]=next;
+    changes.push({assetKey:f.assetKey,track:f.track,cueId:c.id,before,after,start:range.start,end:range.end,
+      checks:flags.map(f=>({kind:f.kindOfCheck,ruleId:f.ruleId||null,note:f.label}))});
+  }
+  const vet=changes.length?{...state,log:[...state.log,{id:crypto.randomUUID(),time:new Date().toISOString(),action:'Applied vet suggestions',changes}].slice(-500)}:state;
+  return {media,vet,changes,conflicts};
+}
+
+export function replaceVetCue(asset,id,track,after,cueText,cueTime) {
+  if(!after.trim())throw new Error('A suggestion cannot empty a cue. Edit or delete it manually.');
+  const field=track==='B'?'cuesB':'cues',c=asset[field]?.find(q=>q.id===id);
+  if(!c)throw new Error('Cue no longer exists.');
+  const range=cueTime(c,asset.words||[]);
     let next={...asset,[field]:asset[field].map(q=>q.id===c.id?{...q,textOverride:after,startOverride:range.start,endOverride:range.end}:q)};
-    if(f.track==='A') {
+    if(track==='A') {
       const old=asset.words||[], indices=old.map((w,i)=>({w,i})).filter(({w})=>(w.s+w.e)/2>=range.start && (w.s+w.e)/2<range.end);
       // Shared/cross-boundary words cannot be replaced safely as a single cue.
-      if(indices.some(({w})=>w.s<range.start-.04 || w.e>range.end+.04)) {conflicts.push(...flags);continue;}
+      if(indices.some(({w})=>w.s<range.start-.04 || w.e>range.end+.04)) throw new Error('Cue shares words across its boundaries. Edit this cue manually.');
       const first=indices[0]?.i??old.findIndex(w=>w.s>=range.start), at=first<0?old.length:first;
       let replacement;
       if(indices.length) {
@@ -85,10 +103,6 @@ export function applyVet(doc,issues,cueText,cueTime) {
       });
       next={...next,words:w,timingEstimated:true,cues:pin(asset.cues||[]),cuesB:pin(asset.cuesB||[])};
     }
-    media[f.assetKey]=next;
-    changes.push({assetKey:f.assetKey,track:f.track,cueId:c.id,before,after,start:range.start,end:range.end,
-      checks:flags.map(f=>({kind:f.kindOfCheck,ruleId:f.ruleId||null,note:f.label}))});
-  }
-  const vet=changes.length?{...state,log:[...state.log,{id:crypto.randomUUID(),time:new Date().toISOString(),action:'Applied vet suggestions',changes}].slice(-500)}:state;
-  return {media,vet,changes,conflicts};
+
+  return next;
 }
