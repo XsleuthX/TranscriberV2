@@ -107,7 +107,7 @@ try {
   await page.keyboard.press('Control+z');
   await expect(monitor.locator('video').first()).toHaveCSS('opacity', '1');
   // Existing local import still decodes real media.
-  await page.getByRole('button', { name: 'Add media', exact: true }).click();
+  await page.locator('.mdadd').getByRole('button', { name: 'Add media', exact: true }).click();
   await page.locator('input[type="file"][accept="video/*,audio/*"]').first().setInputFiles(path.join(directory, 'red.mp4'));
   await expect(page.getByText('red.mp4', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Audio ready. Run Transcribe from the drawer.')).toBeVisible({ timeout: 15000 });
@@ -172,7 +172,7 @@ try {
   await page.route('**/api/media/status?*', async route => {
     await new Promise(r => setTimeout(r, 1200)); await route.continue();
   });
-  await page.getByRole('button', { name: 'Add media', exact: true }).click();
+  await page.locator('.mdadd').getByRole('button', { name: 'Add media', exact: true }).click();
   await page.locator('input[type="file"][accept="video/*,audio/*"]').first().setInputFiles(path.join(directory, 'red.mp4'));
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.keyboard.press('F2');
@@ -238,3 +238,4 @@ try {
   await browser?.close();
   await rm(directory, { recursive: true, force: true });
 }
+
