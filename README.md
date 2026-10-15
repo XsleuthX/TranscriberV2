@@ -1,4 +1,4 @@
-# Transcriber v2.35 - compact vetting and complete transcript copy
+# Transcriber v2.36 - current DeepSeek API and responsive AI requests
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
@@ -198,16 +198,13 @@ fail without replacing subtitles. Review estimates against the recording.
 
 ## DeepSeek assistant output
 
-The old 1,000-token cap is replaced by an 8,192-token DeepSeek budget. A truncated
-reply retries once with a doubled budget, up to 32,768 tokens (an additional
-billed request). If still truncated, partial assistant text is retained and
-Continue output requests the remainder. Incomplete translation/clip JSON is not
-applied to the project. Provider limits still apply; output is not unlimited.
+The model picker uses the current API IDs **deepseek-flash** (V4.1 Flash) and **deepseek-v4-pro**. Thinking is a separate Off / Low / High / Maximum control; Off is the default for responsive editing. **Refresh DeepSeek models** queries the authenticated official /models endpoint using your existing API key. Old Chat/Reasoner IDs remain backend compatibility aliases, but are removed from the dropdown. Keys never appear in the returned model list.
 
-Current choices include DeepSeek Flash and V4 Pro. Saved Chat/Reasoner selections
-explicitly map to Flash without/with thinking, following the provider's retirement
-of the legacy names. See [DeepSeek release notice](https://api-docs.deepseek.com/news/news260424/)
-and [API request/length handling](https://api-docs.deepseek.com/api/create-chat-completion/).
+DeepSeek replies stream through the server with waiting, thinking and generating status. Keepalives keep the browser/server connection active; each request has a 180-second total server deadline and a 200-second browser deadline. Cancel AI stops an in-flight assistant request. Provider authentication, balance, capacity, empty-answer, interrupted-stream and timeout errors are visible. Reasoning content is never used as answer text or applied edits.
+
+Reviews, Story/Timeline assembly, clip finding and translation explicitly request JSON objects with their own schemas. Translation and clip-finding accept legacy array replies for compatibility, but validate cue IDs/ranges. Incomplete JSON is not applied. JSON mode is not forced on freeform chat. Structured review/assembly tasks split oversized batches themselves; they do not incur a second hidden provider-layer truncation retry. Freeform non-thinking replies can retry truncation once with a doubled budget (an additional billed request), retain partial text and offer Continue output. App budgets are 8K or 16K tokens initially, capped at 32K, deliberately below the provider maximum to bound edit latency and cost.
+
+Official references checked 2026-10-15: [models](https://api-docs.deepseek.com/api/list-models/), [thinking](https://api-docs.deepseek.com/guides/thinking_mode/), [JSON output](https://api-docs.deepseek.com/guides/json_mode/), and [chat completion/finish reasons](https://api-docs.deepseek.com/api/create-chat-completion/).
 
 ## Transcription progress and cancellation
 

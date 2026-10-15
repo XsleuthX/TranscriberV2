@@ -1,3 +1,5 @@
+import { deepSeekRequest } from './deepseek.js';
+import { discoveredDeepSeek } from '../src/deepseek-models.js';
 import { OPENAI_MODELS, TRANSCRIPTION_MODELS, usesResponses } from '../src/models.js';
 import { sameOrigin, json, readBody } from './access.js';
 
@@ -9,7 +11,7 @@ export function providerMiddleware(env = {}, deps = {}) {
   };
   return async (req, res, next) => {
     const route = new URL(req.url, 'http://localhost').pathname;
-    if (!['/api/keys', '/api/ai', '/api/transcribe'].includes(route)) return next();
+    if (!['/api/keys', '/api/ai', '/api/transcribe', '/api/deepseek-models'].includes(route)) return next();
     if (!sameOrigin(req, env)) return json(res, 403, { error: { message: 'Open the app from its configured address.' } });
     if (route === '/api/keys') return json(res, 200, { openai: !!env.OPENAI_API_KEY, groq: !!env.GROQ_API_KEY,
       anthropic: !!env.ANTHROPIC_API_KEY, deepseek: !!env.DEEPSEEK_API_KEY, local: true, workspaceProtected: !!env.APP_PASSWORD });
@@ -20,6 +22,13 @@ export function providerMiddleware(env = {}, deps = {}) {
     req.once('aborted', disconnected); res.once('close', closed);
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(300000)]);
     try {
+      if(route==='/api/deepseek-models'){
+        const key=req.headers['x-user-key']||env.DEEPSEEK_API_KEY;
+        if(!key)return json(res,501,{error:{message:'Add your DeepSeek API key first.'}});
+        const response=await apiFetch('https://api.deepseek.com/models',{headers:{Authorization:`Bearer ${key}`},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(20000)])});
+        if(!response.ok)return sendUpstream(res,response);
+        return json(res,200,{models:discoveredDeepSeek(await response.json())});
+      }
       if (route === '/api/ai') {
         const provider = String(req.headers['x-ai-provider'] || 'anthropic');
         const conf = { openai: ['OPENAI_API_KEY', 'gpt-4.1-mini', 'https://api.openai.com/v1/chat/completions'],
@@ -29,6 +38,7 @@ export function providerMiddleware(env = {}, deps = {}) {
         const key = req.headers['x-user-key'] || env[conf[0]];
         if (!key) return json(res, 501, { error: { message: `Add a ${provider} API key in the app or on the server.` } });
         const input = JSON.parse((await readBody(req)).toString()), model = String(req.headers['x-ai-model'] || conf[1]);
+        if(provider==='deepseek')return await deepSeekRequest(req,res,input,model,key,apiFetch,signal,deps.aiTimeoutMs);
         let url = conf[2], payload = input;
         const headers = { 'Content-Type': 'application/json' };
         if (provider === 'anthropic') Object.assign(headers, { 'x-api-key': key, 'anthropic-version': '2023-06-01' });
@@ -44,29 +54,17 @@ export function providerMiddleware(env = {}, deps = {}) {
           } else {
             payload = { model, messages };
             if (!/reason|-r1|thinking/i.test(model)) payload.max_tokens = input.max_tokens || 4096;
-            if (provider === 'deepseek') {
-              // Preserve saved selections while using the current documented IDs.
-              payload.model = ({ 'deepseek-chat': 'deepseek-flash', 'deepseek-reasoner': 'deepseek-flash' })[model] || model;
-              payload.thinking = { type: /reasoner/.test(model) ? 'enabled' : 'disabled' };
-              payload.max_tokens = Math.min(32768, Math.max(8192, Number(input.max_tokens) || 8192));
-            }
+
           }
         }
-        let data;
-        for (let attempt = 0; ; attempt++) {
-          const response = await apiFetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal });
-          if (!response.ok || provider === 'anthropic') return sendUpstream(res, response);
-          data = await response.json();
-          if (provider !== 'deepseek' || data.choices?.[0]?.finish_reason !== 'length' || attempt >= 1 || payload.max_tokens >= 32768) break;
-          // Retry the original prompt once, rather than appending truncated JSON.
-          payload.max_tokens = Math.min(32768, payload.max_tokens * 2);
-        }
+        const response = await apiFetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal });
+        if (!response.ok || provider === 'anthropic') return sendUpstream(res, response);
+        const data = await response.json();
         const text = usesResponses(model) && provider === 'openai'
           ? (data.output || []).filter(o => o.type === 'message').flatMap(o => o.content || []).filter(c => c.type === 'output_text').map(c => c.text).join('\n')
           : data.choices?.[0]?.message?.content;
         if (data.status === 'incomplete' || data.choices?.[0]?.finish_reason === 'length') {
-          if (provider === 'deepseek' && text) return json(res, 200, { content: [{ type: 'text', text }], incomplete: true,
-            warning: 'Output is incomplete. The partial answer has been kept; use Continue output or request a shorter answer.' });
+
           return json(res, 502, { error: { message: `${model} reached its output limit. Try a smaller batch.` } });
         }
         if (!text) return json(res, 502, { error: { message: `${model} returned no answer. Try a smaller batch.` } });

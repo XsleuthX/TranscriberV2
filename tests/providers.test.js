@@ -4,8 +4,8 @@ import http from 'node:http';
 import { providerMiddleware } from '../server/providers.js';
 import { alignTranscript } from '../src/transcript-timing.js';
 
-async function serve(t, upstream) {
-  const middleware = providerMiddleware({}, { fetch: upstream });
+async function serve(t, upstream, options={}) {
+  const middleware = providerMiddleware({}, { fetch: upstream, ...options });
   const server = http.createServer((req, res) => middleware(req, res, () => res.end()));
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(() => { server.closeAllConnections(); return new Promise(r => server.close(r)); });
@@ -85,4 +85,33 @@ test('DeepSeek still-truncated replies retain partial text and stop automatic re
   const response = await fetch(base + '/api/ai', { method: 'POST', headers: { 'x-ai-provider': 'deepseek', 'x-ai-model': 'deepseek-flash', 'x-user-key': 'fixture' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'Text' }] }) });
   const data = await response.json(); assert.equal(response.status, 200); assert.equal(data.incomplete, true);
   assert.equal(data.content[0].text, 'Partial retained.'); assert.equal(calls, 2);
+});
+
+test('DeepSeek discovery is authenticated, uses the official models endpoint and filters legacy aliases',async t=>{
+  let calls=0;const base=await serve(t,async(url,options)=>{
+    calls++;assert.equal(url,'https://api.deepseek.com/models');assert.equal(options.headers.Authorization,'Bearer fixture');
+    return Response.json({data:[{id:'deepseek-flash',name:'Latest Flash'},{id:'deepseek-v4-pro'},{id:'deepseek-chat'}]});
+  });
+  const missing=await fetch(base+'/api/deepseek-models',{method:'POST'});assert.equal(missing.status,501);assert.equal(calls,0);
+  const response=await fetch(base+'/api/deepseek-models',{method:'POST',headers:{'x-user-key':'fixture'}});
+  assert.deepEqual((await response.json()).models.map(m=>m.id),['deepseek-flash','deepseek-v4-pro']);
+});
+
+test('DeepSeek progressive requests send explicit JSON/thinking fields and a terminal timeout result',async t=>{
+  const base=await serve(t,async(url,options)=>{
+    const body=JSON.parse(options.body);assert.equal(body.model,'deepseek-v4-pro');assert.equal(body.thinking.type,'enabled');assert.equal(body.reasoning_effort,'low');assert.equal(body.response_format.type,'json_object');assert.equal(body.stream,true);
+    return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true}));
+  },{aiTimeoutMs:30});
+  const response=await fetch(base+'/api/ai',{method:'POST',headers:{'x-ai-provider':'deepseek','x-ai-model':'deepseek-v4-pro','x-ai-thinking':'low','x-ai-progress':'1','x-user-key':'fixture'},body:JSON.stringify({messages:[{role:'user',content:'Return JSON {"flags":[]}.'}],response_format:{type:'json_object'}})});
+  assert.equal(response.headers.get('content-type'),'application/x-ndjson');
+  const events=(await response.text()).trim().split('\n').map(JSON.parse);assert.equal(events[0].type,'status');assert.equal(events.at(-1).status,504);assert.match(events.at(-1).data.error.message,/request limit/);
+});
+
+test('cancelling a progressive DeepSeek request aborts the upstream request after headers have arrived',async t=>{
+  let stopped;const cancelled=new Promise(resolve=>{stopped=resolve;});
+  const base=await serve(t,async(url,options)=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>{stopped();reject(options.signal.reason);},{once:true})));
+  const controller=new AbortController();
+  const response=await fetch(base+'/api/ai',{method:'POST',signal:controller.signal,headers:{'x-ai-provider':'deepseek','x-ai-progress':'1','x-user-key':'fixture'},body:JSON.stringify({messages:[{role:'user',content:'Hello'}]})});
+  controller.abort();await response.body.cancel().catch(()=>{});
+  await Promise.race([cancelled,new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('DeepSeek cancellation was not forwarded')),2000);timer.unref();})]);
 });
