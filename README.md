@@ -1,9 +1,17 @@
-# Transcriber v2.33 - safer transcription and subtitle repair
+# Transcriber v2.34 - integrated subtitle vetting
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
 
-## Transcription changes in v2.33
+## Subtitle Vet in v2.34
+
+Open Transcript or Subtitle and click **Vet**. Use inline Apply/Dismiss, Previous/Next issue, or the optional Issues only view with the player. UK spelling and configurable Chinese punctuation checks run locally without an API key; punctuation removal is off by default. Decimals, URLs, email addresses, common honorifics, contractions and formatting tags are protected. Context-dependent spellings require individual review.
+
+**Vet settings → Team rules** parses explicit correction comments, retains ambiguous notes for manual review, supports literal replacement/deletion and case/whole-word options, and reports remaining matches. Rules import/export as JSON. **Apply shown…** previews the selected category before a bulk transaction. Stale/overlapping/unsafe shared-word edits are skipped. Undo restores text and review decisions. **History** downloads a review report.
+
+Reviews follow the active source and A/B track; Dual Sub has an explicit Vet track selector. Applying Sub A corrections updates Transcript prose and preserves cue IDs/times, Sub B text, source clip references and Story linkage. Changed word timing is marked estimated. Rules, decisions, notes and history are included in autosave and project JSON. UTF-8 and BOM-tagged UTF-16 subtitle imports are supported. Team rules belong to the local project; they are not a shared cloud review service.
+
+## Transcription changes retained from v2.33
 
 - Hosted recognition uses approximately 75–90 second chunks near quiet points with overlapping context. This makes more API requests than the old ten-minute plan.
 - Chinese lexical units, honorific names and dictionary terms are kept together. Short adjacent segments split inside a word/name or before closing punctuation are regrouped. Transcript and Subtitle text both follow decoded segments; words only supply timing after punctuation/case-tolerant reconciliation. Mismatched Transcript word timing is marked as estimated.

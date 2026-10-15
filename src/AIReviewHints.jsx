@@ -11,10 +11,11 @@ export function ReviewHint({ kind, id, track, assetKey, wordStart, wordEnd, star
     return flag.kind === kind && flag.id === id && (kind === 'card' || !flag.track || flag.track === (track ?? review.editTrack));
   });
   if (!flags.length) return null;
+  const label=flags.every(f=>f.origin==='vet')?'Vet':flags.some(f=>f.origin==='vet')?'Review':'AI';
   return <span className="ai-hint" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-    <button ref={button} type="button" className="ai-flag" aria-label={`AI flags: ${flags.length}`} aria-expanded={open}
-      onClick={() => setOpen(true)} onMouseEnter={() => setOpen(true)} onFocus={() => setOpen(true)} onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>AI {flags.length}</button>
-    {open && createPortal(<span role="dialog" aria-label="AI review hint" className="ai-popover" onClick={e => e.stopPropagation()}
+    <button ref={button} type="button" className="ai-flag" aria-label={`${label} flags: ${flags.length}`} aria-expanded={open}
+      onClick={() => setOpen(true)} onMouseEnter={() => setOpen(true)} onFocus={() => setOpen(true)} onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>{label} {flags.length}</button>
+    {open && createPortal(<span role="dialog" aria-label={label==='AI'?'AI review hint':'Vet review hint'} className="ai-popover" onClick={e => e.stopPropagation()}
       style={{ position: 'fixed', zIndex: 10000, left: Math.max(8, Math.min(window.innerWidth - 338, bounds?.left || 8)), top: Math.max(8, Math.min(window.innerHeight - 260, (bounds?.bottom || 8) + 5)) }}>
       <button className="btn sm" onClick={() => setOpen(false)}>Close hint</button>
       {flags.map(f => <span className="ai-explanation" key={f.reviewId}><b>{f.stale ? 'Content changed — review again' : f.presetLabel}</b><span>{f.reason}</span>

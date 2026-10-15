@@ -1,3 +1,4 @@
+import { emptyVet, validVet } from './subtitle-vet.js';
 const FORMAT = 'transcriber-project';
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const fail = message => { throw new Error('Invalid project JSON: ' + message); };
@@ -40,7 +41,7 @@ export function exportProjectJSON(project) {
     return [id, copy];
   }));
   return JSON.stringify({ format: FORMAT, version: 1, exportedAt: new Date().toISOString(),
-    project: { media, rows: project.rows, mtl: project.mtl, rules: project.rules, reviews: project.reviews || [],
+    project: { media, rows: project.rows, mtl: project.mtl, rules: project.rules, reviews: project.reviews || [], vet: project.vet || emptyVet(),
       activeAsset: project.media[project.activeAsset] ? project.activeAsset : Object.keys(project.media)[0] || null, ui: project.ui || {}, v: 1 } }, null, 2);
 }
 export function importProjectJSON(text) {
@@ -50,6 +51,8 @@ export function importProjectJSON(text) {
   });
   if (envelope?.format !== FORMAT || envelope.version !== 1 || !object(envelope.project)) fail('Unsupported format or version.');
   const p = envelope.project;
+  if (p.vet != null && !validVet(p.vet)) fail('Invalid subtitle vet rules, decisions or history.');
+  p.vet = p.vet || emptyVet();
   if (!object(p.media)) fail('Media is missing.');
   for (const [key, asset] of Object.entries(p.media)) {
     if (!key || !object(asset) || typeof asset.name !== 'string' || !['local', 'iconik', 'youtube', 'drive'].includes(asset.type)) fail('Invalid media entry.');
@@ -127,5 +130,5 @@ export function importProjectJSON(text) {
   if (typeof p.ui.priming === 'boolean') ui.priming = p.ui.priming;
   if (p.ui.dictionary) ui.dictionary = Object.fromEntries(['asr','tr'].map(field =>
     [field,p.ui.dictionary[field].map(({from,to})=>({from,to}))]));
-  return { media: p.media, rows: p.rows, mtl: p.mtl, rules: p.rules, reviews: p.reviews, activeAsset: p.activeAsset, ui, v: 1 };
+  return { media: p.media, rows: p.rows, mtl: p.mtl, rules: p.rules, reviews: p.reviews, vet: p.vet, activeAsset: p.activeAsset, ui, v: 1 };
 }

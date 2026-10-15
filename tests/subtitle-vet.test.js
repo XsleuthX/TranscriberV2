@@ -1,0 +1,71 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {emptyVet,scanVet,applyVet,dismissVet,parseComments,ruleList,validVet,subtitleFileText} from '../src/subtitle-vet.js';
+import {scan,applyIssues} from '../src/vet-core.js';
+import {createDocumentHistory} from '../src/document-history.js';
+import {exportProjectJSON,importProjectJSON} from '../src/project-json.js';
+const text=(c,w)=>c.textOverride??w.slice(c.ws,c.we+1).map(w=>w.t).join(' ');
+const time=(c,w)=>({start:c.startOverride??w[c.ws]?.s??0,end:c.endOverride??w[c.we]?.e??1});
+test('Subtitle decoding accepts UTF-8 and BOM-tagged UTF-16 in either byte order and rejects corrupt encoding',async()=>{
+ const input='1\r\n00:00:01,000 --> 00:00:03,000\r\n字幕 colour.';
+ const utf16=Buffer.from('\uFEFF'+input,'utf16le'),bigEndian=Buffer.from(utf16);bigEndian.swap16();
+ for(const bytes of [Buffer.from(input),utf16,bigEndian])assert.equal(await subtitleFileText({arrayBuffer:async()=>bytes}),input);
+ await assert.rejects(()=>subtitleFileText({arrayBuffer:async()=>new Uint8Array([255,255,0])}));
+});
+const fixture=()=>({vet:emptyVet(),media:{one:{name:'one',type:'local',words:[{i:0,t:'My favorite color.',s:0,e:3},{i:1,t:'A second color.',s:5,e:8}],cues:[{id:'first',ws:0,we:0,textOverride:'My favorite color.',startOverride:0,endOverride:3,orig:{text:'My favorite color.',start:0,end:3}},{id:'second',ws:1,we:1,textOverride:'A second color.',startOverride:5,endOverride:8}],cuesB:[{id:'first_B',ws:0,we:0,textOverride:'B color.',startOverride:0,endOverride:3}],clips:[{id:'clip',in:0,out:3,cueRefs:['first']}]},two:{name:'two',type:'local',words:[],cues:[],cuesB:[],clips:[]}},rows:[{id:'row',label:'Story',cards:[{id:'card',kind:'cue',col:'video',assetKey:'one',cueRefs:['first'],sourceCueRefs:['first'],sin:0,sout:3}]}],mtl:{tracks:[],clips:[],markers:[]},rules:{maxChars:42},reviews:[],activeAsset:'one',ui:{}});
+test('Local checks preserve numeric/URL/email/abbreviation/contraction/tag content and contextual words are opt-in',()=>{
+ const original='<i>color</i> 版本3.5，Dr. Lotus uses example.com and a@b.com; don’t re-check program license meter check。';
+ const input={cues:[{id:'c',current:original}]};
+ const flags=scan(input,[],{uk:true,chinese:'all',contextual:false});
+ assert.equal(flags.filter(f=>f.kind==='uk').length,1);
+ assert.deepEqual(flags.filter(f=>f.kind==='chinese').map(f=>f.from),['，',';','。']);
+ applyIssues(input,flags);
+ for(const term of ['<i>colour</i>','3.5','Dr.','example.com','a@b.com','don’t','re-check','program license meter check'])assert.ok(input.cues[0].current.includes(term),term);
+ assert.ok(scan({cues:[{id:'c',current:'program license meter check'}]},[],{uk:true,chinese:'off',contextual:true}).every(f=>f.contextual));
+});
+test('Comments parse only explicit corrections; literal rules support deletion, case and protected formatting',()=>{
+ const parsed=parseComments('color → brand shade\nReplace "old" with "new"\nPlease make this clearer');
+ assert.equal(parsed.rules.length,2);assert.deepEqual(parsed.unparsed,['Please make this clearer']);
+ const rules=ruleList([{from:'old',to:'$&',caseSensitive:false,wholeWord:true},{from:'remove',to:''},{from:'example.com',to:'new.example.com'}]);
+ const input={cues:[{id:'c',current:'<i old="x">OLD</i> older remove example.com'}]};
+ applyIssues(input,scan(input,rules,{uk:false,chinese:'off'}));
+ assert.equal(input.cues[0].current,'<i old="x">$&</i> older  new.example.com');
+ assert.equal(scan(input,ruleList([{from:'support',to:'support team'}]),{uk:false,chinese:'off'}).length,0);
+ assert.throws(()=>ruleList([{from:'',to:'x'}]));
+});
+test('Apply keeps cue identity, pinned times, B text and Story/Timeline references while synchronising Transcript text',()=>{
+ const doc=fixture(),flags=scanVet(doc,'one','A',text,time), result=applyVet(doc,flags,text,time);
+ assert.equal(result.changes.length,2);assert.equal(result.conflicts.length,0);
+ const a=result.media.one;
+ assert.deepEqual(a.cues.map(c=>c.id),['first','second']);
+ assert.deepEqual(a.cues.map(c=>time(c,a.words)),doc.media.one.cues.map(c=>time(c,doc.media.one.words)));
+ assert.equal(text(a.cues[0],a.words),'My favourite colour.');
+ assert.equal(a.words.map(w=>w.t).join(' '),'My favourite colour. A second colour.');
+ assert.equal(text(a.cuesB[0],a.words),'B color.');assert.deepEqual(time(a.cuesB[0],a.words),{start:0,end:3});
+ assert.deepEqual(a.clips,doc.media.one.clips);assert.deepEqual(result.media.two,doc.media.two);
+ assert.deepEqual(doc.rows[0].cards[0].cueRefs,['first']);
+ assert.equal(doc.media.one.words.length,2);assert.equal(doc.vet.log.length,0);
+ assert.equal(result.vet.log.length,1);assert.ok(validVet(result.vet));
+});
+test('B review is independent; stale text, deleted rules, overlapping suggestions and empty cue deletion are guarded',()=>{
+ const doc=fixture(),f=scanVet(doc,'one','B',text,time);
+ const b=applyVet(doc,f,text,time);assert.deepEqual(b.media.one.words,doc.media.one.words);assert.deepEqual(b.media.one.cues,doc.media.one.cues);
+ const flags=scanVet(doc,'one','A',text,time);doc.media.one.cues[0].textOverride='Newer manual edit';
+ const stale=applyVet(doc,flags.filter(f=>f.cueId==='first'),text,time);assert.equal(stale.changes.length,0);assert.ok(stale.conflicts.length>0);
+ const d=fixture();d.vet.rules=ruleList([{from:'My favorite color.',to:''}]);
+ const empty=applyVet(d,scanVet(d,'one','A',text,time).filter(f=>f.kindOfCheck==='team'),text,time);assert.equal(empty.changes.length,0);
+ const r=fixture();r.vet.rules=ruleList([{from:'color',to:'brand shade'}]);const ruleFlags=scanVet(r,'one','A',text,time).filter(f=>f.kindOfCheck==='team');r.vet.rules=[];
+ assert.equal(applyVet(r,ruleFlags,text,time).changes.length,0);
+ const overlapping=fixture();overlapping.vet.rules=ruleList([{from:'color',to:'brand shade'}]);
+ const conflict=applyVet(overlapping,scanVet(overlapping,'one','A',text,time),text,time);assert.ok(conflict.conflicts.length>0);assert.ok(text(conflict.media.one.cues[0],conflict.media.one.words).includes('brand shade'));
+});
+test('Dismissal is scoped to exact text, persists in JSON, and bulk changes are one document Undo with Redo',async()=>{
+ const doc=fixture(),h=createDocumentHistory(doc);h.enable();
+ const flags=scanVet(doc,'one','A',text,time);
+ const applied=applyVet(doc,flags,text,time);h.update('media',applied.media);h.update('vet',applied.vet);await Promise.resolve();
+ assert.ok(h.undo());assert.deepEqual(h.current.media,doc.media);assert.equal(h.current.vet.log.length,0);assert.ok(h.redo());
+ const d=fixture();d.vet=dismissVet(d,[flags[0]]);assert.equal(scanVet(d,'one','A',text,time).length,flags.length-1);
+ d.media.one.cues[0].textOverride+=' Edited';assert.ok(scanVet(d,'one','A',text,time).some(f=>f.from===flags[0].from));
+ const restored=importProjectJSON(exportProjectJSON(d));assert.deepEqual(restored.vet,d.vet);
+ const bad=JSON.parse(exportProjectJSON(d));bad.project.vet.rules=[{id:'bad',from:4,to:'x'}];assert.throws(()=>importProjectJSON(JSON.stringify(bad)));
+});

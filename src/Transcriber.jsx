@@ -1,3 +1,5 @@
+import SubtitleVet, { VetIssues } from './SubtitleVet.jsx';
+import { emptyVet, vetState, validVet, scanVet, applyVet, dismissVet, subtitleFileText } from './subtitle-vet.js';
 import { transcriptWordsFromSegments, captionsFromSegments, sanitiseCaptionTimes, reviewCaptionQuality, appendSpeechChunk, audioActivity, missingAudioRanges, acceptableRepair, buildSpeechPrompt, correctGlossary } from './subtitle-quality.js';
 import { createAudioTasks, waitForAudio, runWhisperJob } from './audio-task.js';
 import { readMedia, serverSamples } from './media-ingest.js';
@@ -1185,7 +1187,7 @@ export default function Transcriber() {
   const { doc: documentState, update: updateDocument, history } = useDocumentHistory(() => {
     const w1 = buildDemoWords();
     const w2 = buildSecondWords();
-    return { reviews: [], rules: DEFAULT_RULES, rows: [{ id: 'r1', label: 'Cold open', cards: [] }, { id: 'r2', label: 'The process', cards: [] }],
+    return { vet: emptyVet(), reviews: [], rules: DEFAULT_RULES, rows: [{ id: 'r1', label: 'Cold open', cards: [] }, { id: 'r2', label: 'The process', cards: [] }],
       mtl: { tracks: defaultTracks(), clips: [], markers: [] }, media: {
       a1: { name: "Reel 04 — Restoration bay", type: "local", url: null,
             words: w1, cues: segment(w1, DEFAULT_RULES), cuesB: [], clips: [] },
@@ -1193,7 +1195,9 @@ export default function Transcriber() {
             words: w2, cues: segment(w2, DEFAULT_RULES), cuesB: [], clips: [] },
     }};
   });
-  const { media, rows, mtl, rules, reviews } = documentState;
+  const { media, rows, mtl, rules, reviews, vet } = documentState;
+  const setVet = useCallback(change => updateDocument('vet', change), [updateDocument]);
+  const [vetOpen,setVetOpen] = useState(false), [vetOnly,setVetOnly] = useState(false), [vetCategory,setVetCategory] = useState('all');
   const setReviews = useCallback(change => updateDocument('reviews', change), [updateDocument]);
   const setMedia = useCallback(change => updateDocument('media', change), [updateDocument]);
   const setRows = useCallback(change => updateDocument('rows', change), [updateDocument]);
@@ -1537,6 +1541,7 @@ export default function Transcriber() {
       if (doc.mtl) setMtl(doc.mtl);
       if (doc.rules) setRules(doc.rules);
       if (Array.isArray(doc.reviews)) setReviews(doc.reviews);
+      if (validVet(doc.vet)) setVet(doc.vet);
       if (doc.activeAsset && doc.media?.[doc.activeAsset]) setActiveAsset(doc.activeAsset);
       if (doc.ui) {
         if (doc.ui.docSize) setDocSize(doc.ui.docSize);
@@ -1561,13 +1566,13 @@ export default function Transcriber() {
     setSaved("saving");
     const t = setTimeout(() => {
       if (importingProject.current) return;
-      saveProject({ media: serialisable(media), rows, mtl, rules, reviews, activeAsset,
+      saveProject({ media: serialisable(media), rows, mtl, rules, reviews, vet, activeAsset,
         ui: { docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime }, v: 1 })
         .then(() => setSaved("saved"))
         .catch(() => setSaved("error"));
     }, 900);
     return () => clearTimeout(t);
-  }, [media, rows, mtl, rules, reviews, activeAsset, restored, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime]);
+  }, [media, rows, mtl, rules, reviews, vet, activeAsset, restored, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime]);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2800); return () => clearTimeout(t); }, [toast]);
   useEffect(() => {
@@ -3392,6 +3397,34 @@ export default function Transcriber() {
   const docUndo = () => { document.activeElement?.blur?.(); if (history.undo()) afterHistory('Undo'); };
   const docRedo = () => { document.activeElement?.blur?.(); if (history.redo()) afterHistory('Redo'); };
 
+  const vetTrack = ws === 'transcript' ? 'A' : editTrack;
+  const vetFlags = useMemo(() => vetOpen ? scanVet(documentState,activeAsset,vetTrack,cueText,cueTime) : [], [vetOpen,media,vet,activeAsset,vetTrack]);
+  const visibleVet = vetFlags.filter(f=>vetCategory==='all'||f.kindOfCheck===vetCategory);
+  const vetOnlyView = vetOpen && vetOnly && ['transcript','subtitle'].includes(ws);
+  const revealVet = (flag,editor=false) => {
+    if(editor)setVetOnly(false);
+    storySeek(flag.startTime,flag.assetKey);
+    const own=history.current.media[flag.assetKey];
+    if(ws==='transcript' && flag.track==='A') {
+      const index=(own?.words||[]).findIndex(w=>w.e>flag.startTime);
+      if(index>=0){setSel({a:index,b:index});setFollowTurn(turns.findIndex(t=>t.words.some(w=>w.i===index)));}
+    } else {
+      if(ws!=='subtitle')setWs('subtitle');
+      if(track!=='DUAL')setTrack(flag.track);
+      overlayTrackRef.current=flag.track;setOverlayTrack(flag.track);
+      const index=(flag.track==='B'?own?.cuesB:own?.cues)?.findIndex(c=>c.id===flag.cueId);
+      setSelCue(index);setFollowTarget(index);if(flag.track==='B')setFollowB(index);else setFollowA(index);
+    }
+  };
+  const applyVetFlags = flags => {
+    if(audioTasks.current.current){setToast('Finish or cancel the audio operation before applying vet changes.');return;}
+    document.activeElement?.blur?.();
+    const result=applyVet(history.current,flags,cueText,cueTime);
+    if(result.changes.length){setMedia(result.media);setVet(result.vet);}
+    setToast(result.changes.length+' cues updated'+(result.conflicts.length?' · '+result.conflicts.length+' conflicting, shared-range or stale suggestions need review':'')+'. Undo is available.');
+  };
+  const dismissVetFlags = flags => setVet(dismissVet(history.current,flags));
+
   const findTrack = ws === 'transcript' ? 'A' : track === 'DUAL' ? findState.dualTrack : track;
   const findCues = findTrack === 'B' ? cuesB : cuesA;
   const findHits = useMemo(() => {
@@ -3505,7 +3538,10 @@ export default function Transcriber() {
   const onSrt = async (e, tk = "A") => {
     const f = e.target.files?.[0];
     if (!f) return;
-    const { words: w, cues: cs } = srtToProject(await f.text());
+    let content;
+    try { content = await subtitleFileText(f); }
+    catch { setToast('Subtitle import failed: use a UTF-8 or UTF-16 subtitle file. Your current subtitles were kept.'); e.target.value=''; return; }
+    const { words: w, cues: cs } = srtToProject(content);
     e.target.value = "";
     if (!cs.length) { setToast("No cues found in that file."); return; }
     // Verbatim: the user's line breaks and timings survive import untouched.
@@ -3746,7 +3782,7 @@ export default function Transcriber() {
   /* ═══════════════════════════ render ═══════════════════════════════════ */
 
   return (
-    <AIReviewContext.Provider value={{ flags: liveReviews, activeAsset, editTrack, reveal: revealReview, apply: applyReview, dismiss: dismissReview }}>
+    <AIReviewContext.Provider value={{ flags: [...liveReviews,...vetFlags], activeAsset, editTrack, reveal: f => f.origin==='vet'?revealVet(f,true):revealReview(f), apply: f => f.origin==='vet'?applyVetFlags([f]):applyReview(f), dismiss: f => f.origin==='vet'?dismissVetFlags([f]):dismissReview(f) }}>
     <TcOffset.Provider value={useSrcTc ? (parseTc(cur.startTc || "") ?? 0) : 0}>
     <div className="tx" style={{ zoom: uiZoom, "--doc-size": `${docSize}px` }}>
       <style dangerouslySetInnerHTML={{ __html: CSS + `.ai-hint{display:inline-block;vertical-align:middle;margin-right:5px}.tx .ai-flag{background:#fff0c5;color:#654700;border:1px solid #d6ad3b;border-radius:5px;padding:2px 5px;font-size:11px;cursor:pointer}.ai-popover{display:block;width:320px;max-height:250px;overflow:auto;background:#fff;color:#202124;border:1px solid #d6ad3b;border-radius:8px;padding:10px;box-shadow:0 6px 24px #0004;font:13px system-ui}.ai-explanation{display:grid;gap:7px;margin-top:10px;border-top:1px solid #ddd;padding-top:8px;white-space:normal}.ai-review-item{border:1px solid var(--rule);border-radius:6px;padding:8px;margin:8px 0;font-size:12px}.ai-review-item p{white-space:pre-wrap}.ai-review-item .btn{margin:3px}.ai-popover button{border:1px solid #ddd;border-radius:6px;background:#f7f8fa;color:#202124;cursor:pointer;padding:5px 9px;font:12px system-ui}.ai-popover button:hover{background:#edf3ff}.ai-popover button:disabled{opacity:.5;cursor:default}` }} />
@@ -3912,6 +3948,14 @@ export default function Transcriber() {
           <button className="tb" disabled={!findHits.length || !!job} onClick={() => replaceFound(false)}>Replace</button>
           <button className="tb" disabled={!findHits.length || !!job} onClick={() => replaceFound(true)}>Replace all</button>
         </div>}
+        {['transcript','subtitle'].includes(ws) && <SubtitleVet open={vetOpen} onToggle={()=>{document.activeElement?.blur?.();setVetOpen(v=>!v);}} only={vetOnly} onOnly={setVetOnly}
+          state={vetState(documentState)} onState={setVet} flags={vetFlags} scope={(cur.name||'Active media')+' · Sub '+vetTrack}
+          scopeKey={JSON.stringify([activeAsset,vetTrack])}
+          onReveal={revealVet} onApply={applyVetFlags} onDismiss={dismissVetFlags} onUndo={docUndo} canUndo={history.canUndo}
+          category={vetCategory} onCategory={setVetCategory} disabled={!!job}
+          dual={ws==='subtitle'&&track==='DUAL'} track={vetTrack} onTrack={tk=>{overlayTrackRef.current=tk;setOverlayTrack(tk);}}
+          cues={(vetTrack==='B'?cuesB:cuesA).map(c=>({id:c.id,text:cueText(c,words)}))}
+          report={{format:'subtitle-vet-report',version:1,exportedAt:new Date().toISOString(),rules:vet?.rules||[],notes:vet?.notes||[],history:vet?.log||[],dismissed:vet?.dismissed||[],pending:vetFlags.map(({assetKey,track,cueId,before,suggestion,reason,startTime,endTime})=>({assetKey,track,cueId,before,suggestion,reason,startTime,endTime}))}} />}
       </div>
 
       <div className="body">
@@ -4007,7 +4051,8 @@ export default function Transcriber() {
 
         {/* surface */}
         <div className="surface" data-ac={String(activeCue)} data-at={String(activeTurn)} data-follow={String(follow)}>
-          {ws === "transcript" && (
+          {vetOnlyView && <><VetIssues flags={visibleVet} onReveal={revealVet} onApply={applyVetFlags} onDismiss={dismissVetFlags}/><Transport {...{ playing, toggle, time, duration, seek }} /></>}
+          {!vetOnlyView && ws === "transcript" && (
             <>
               <VirtualList className="paper" onCopy={onCopyWords} count={turns.length} estimate={140}
                 always={[editTurn].filter((x) => x != null)}
@@ -4050,7 +4095,7 @@ export default function Transcriber() {
             </>
           )}
 
-          {ws === "subtitle" && track === "DUAL" && (
+          {!vetOnlyView && ws === "subtitle" && track === "DUAL" && (
             <>
               <div className="paper dual">
                 {[["A", cuesA], ["B", cuesB]].map(([tk, list]) => (
@@ -4099,7 +4144,7 @@ export default function Transcriber() {
             </>
           )}
 
-          {ws === "subtitle" && track !== "DUAL" && (
+          {!vetOnlyView && ws === "subtitle" && track !== "DUAL" && (
             <>
               {track === "B" && !cues.length ? (
                 <div className="paper">

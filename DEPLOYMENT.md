@@ -1,4 +1,4 @@
-# Host Transcriber v2.33
+# Host Transcriber v2.34
 
 The source repository is https://github.com/XsleuthX/TranscriberV2.
 Deploy this app to one Node/container service. A hosting provider has not yet been selected.
@@ -50,8 +50,8 @@ Use `/healthz` for the host health check.
 ## Try the container locally
 
 ```powershell
-docker build -t transcriber:2.33 .
-docker run --rm -p 3000:3000 --env-file .env transcriber:2.33
+docker build -t transcriber:2.34 .
+docker run --rm -p 3000:3000 --env-file .env transcriber:2.34
 ```
 
 For that local test, set `APP_ORIGIN=http://localhost:3000` and a workspace
