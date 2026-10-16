@@ -13,12 +13,13 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/fixture/playback.mp4', async route => route.fulfill({ contentType: 'video/mp4', body: await fs.readFile(playback) }));
   await page.route('**/api/keys', route => route.fulfill({ json: { anthropic: true } }));
-  let hold = false, held, truncate = false;
+  let hold = false, held, truncate = false,malformedOnce=false;
   await page.route('**/api/ai', async route => {
     const prompt = route.request().postDataJSON().messages[0].content;
     const kind = prompt.includes('SOURCE CUES:\n') ? 'cues' : prompt.includes('CANDIDATE QUOTES:\n') ? 'story' : 'freeform';
-    const items = kind === 'freeform' ? [] : JSON.parse(prompt.split(kind === 'cues' ? 'SOURCE CUES:\n' : 'CANDIDATE QUOTES:\n')[1].split('\nEditor brief:')[0]);
+    const items = kind === 'freeform' ? [] : JSON.parse(prompt.split(kind === 'cues' ? 'SOURCE CUES:\n' : 'CANDIDATE QUOTES:\n')[1].split('\nEditor brief:')[0].split('\nCorrect the previous format:')[0]);
     requests.push({ kind, items });
+    if(malformedOnce){malformedOnce=false;return route.fulfill({json:{content:[{type:'text',text:'invalid JSON fixture'}]}});}
     let result = kind === 'cues' ? { clips: [...new Set(items.map(c => c.assetKey))].map(key => {
       const own = items.filter(c => c.assetKey === key); return { from: own[0].id, to: own[Math.min(1, own.length - 1)].id, label: key + ' punchy quote', why: 'Strong opening' };
     }) } : kind === 'story' ? { sections: [{ title: 'Hook', clips: [items.at(-1).id] }, { title: 'Development', clips: [items[0].id] }] } : 'Retained chat output';
@@ -72,6 +73,18 @@ try {
   doc = await read(); expect(doc.rows[0]).toEqual(fixture.rows[0]); expect(doc.rows.slice(1).map(r => r.cards[0].assetKey)).toEqual(['two', 'one']);
   expect(doc.rows[1].cards[0].cueRefs).toEqual(['cue0', 'cue1']); expect(doc.rows[1].cards[0].body).toBe(texts.slice(0, 2).join('\n'));
   await page.reload(); await expect(page.locator('.dcard')).toHaveCount(3); expect((await read()).rows.length).toBe(3);
+  // Generated cards remain normal editable, source-linked Story cards.
+  const generatedBody=page.locator('.dcard .dbody').nth(1);await generatedBody.focus();
+  await generatedBody.locator('[data-story-cue]').first().evaluate(el=>{el.textContent='User edited sample quote.';el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText'}));});await generatedBody.press('Tab');
+  await expect.poll(async()=>(await read()).media.two.cues[0].textOverride).toBe('User edited sample quote.');
+  await seed();await preset('story_suggestion');hold=true;await run();await expect.poll(()=>!!held).toBe(true);
+  await page.keyboard.press('F4');const shot=page.locator('.dcard .dsel').first();const secondShot=await shot.locator('option').nth(1).getAttribute('value')||await shot.locator('option').nth(1).textContent();await shot.selectOption(secondShot);
+  hold=false;await held.reply();await expect(page.getByText(/Story was edited while AI was running/)).toBeVisible();
+  expect((await read()).rows.length).toBe(1);await expect.poll(async()=>(await read()).rows[0].cards[0].label).toBe(secondShot);
+  await seed();await preset('story_suggestion');hold=true;await run();await expect.poll(()=>!!held).toBe(true);
+  await page.getByRole('button',{name:'Cancel AI',exact:true}).click();await expect(page.getByRole('button',{name:'Run',exact:true})).toBeEnabled();
+  await held.reply().catch(()=>{});expect((await read()).rows).toEqual(fixture.rows);
+  await seed();await preset('story_suggestion');malformedOnce=true;await run();await expect(page.getByText(/Added 2 source-linked cards/)).toBeVisible();
   await seed(); await preset('story_suggestion'); await run(); await expect(page.getByText(/Added 2 source-linked cards/)).toBeVisible();
   await undo(); await expect.poll(async () => (await read()).rows.length).toBe(1);
   // A changed source cannot receive stale AI-derived clips.

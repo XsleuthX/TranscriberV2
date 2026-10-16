@@ -35,7 +35,7 @@ export function parseQuotePicks(text, items) {
     const cues = items.filter(item => item.assetKey === first.assetKey && item.index >= first.index && item.index <= last.index);
     if (cues.length !== last.index - first.index + 1 || last.end <= first.start || last.end - first.start > 120) continue;
     const key = first.id + ':' + last.id;
-    if (seen.has(key)) continue;
+    if (seen.has(key)||found.some(p=>p.assetKey===first.assetKey&&p.cueRefs.some(ref=>cues.some(c=>c.cueId.replace(/_B$/,'')===ref)))) continue;
     seen.add(key);
     found.push({ assetKey: first.assetKey, cueRefs: cues.map(c => c.cueId.replace(/_B$/, '')),
       in: first.start, out: last.end, text: cues.map(c => c.text).join('\n'),
@@ -54,7 +54,10 @@ export function parseStoryPlan(text, candidates) {
     const clips = section.clips.map(id => {
       if (!byId.has(id)) throw new Error('Story referenced an unknown clip.');
       if (used.has(id)) return null;
-      used.add(id); return byId.get(id);
+      const pick=byId.get(id);
+      if([...used].some(usedId=>{const other=byId.get(usedId);return other.assetKey===pick.assetKey&&other.cueRefs?.some(ref=>pick.cueRefs?.includes(ref));}))return null;
+      if(used.size>=80)throw new Error('Keep a sample story to at most 80 clips.');
+      used.add(id); return pick;
     }).filter(Boolean);
     return { title: section.title.trim().slice(0, 100), clips };
   }).filter(section => section.clips.length);

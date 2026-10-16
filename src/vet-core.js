@@ -32,6 +32,7 @@ catalog:catalogue catalogs:catalogues dialog:dialogue dialogs:dialogues
 check:cheque checks:cheques practice:practice`.split(/\s+/).map(x => x.split(':')).filter(([a,b]) => a !== b);
   const contextual = new Set(['meter','meters','program','programs','license','licenses','check','checks']);
   const dictionary = new Map(pairs);
+  export const spellingCoverage=()=>({count:dictionary.size,direction:'US → UK (−ise house style)',contextual:[...contextual],entries:[...dictionary].map(([from,to])=>({from,to}))});
   const han = /\p{Script=Han}/u;
   const punct = /\p{P}/gu;
   const tags = /(<[^>]*>|\{\\[^}]*\}|&(?:#\d+|#x[0-9a-f]+|[a-z]+);)/gi;
@@ -109,6 +110,8 @@ check:cheque checks:cheques practice:practice`.split(/\s+/).map(x => x.split(':'
       if(options.uk) for(const span of spans(c.current)) {
         if(span.protected) continue;
         for(const m of span.text.matchAll(/[A-Za-z]+/g)) {
+          const left=Array.from(span.text.slice(0,m.index)).at(-1)||'',right=Array.from(span.text.slice(m.index+m[0].length))[0]||'';
+          if(/[\p{L}\p{N}_]/u.test(left)||/[\p{L}\p{N}_]/u.test(right))continue;
           const word=m[0].toLowerCase(), replacement=dictionary.get(word);
           if(replacement && (options.contextual || !contextual.has(word))) push(c,'uk',span.offset+m.index,m[0],caseLike(m[0],replacement),'UK spelling', {contextual:contextual.has(word)});
         }

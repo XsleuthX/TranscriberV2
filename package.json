@@ -1,7 +1,7 @@
 {
   "name": "transcriber",
   "private": true,
-  "version": "2.36.1",
+  "version": "2.37.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/run.mjs dev",
@@ -20,7 +20,8 @@
     "test:subtitle-quality-browser": "node tests/subtitle-quality-browser.mjs",
     "test:subtitle-vet-browser": "node tests/subtitle-vet-browser.mjs",
     "test:transcript-copy-browser": "node tests/transcript-copy-browser.mjs",
-    "test:deepseek-browser": "node tests/deepseek-browser.mjs"
+    "test:deepseek-browser": "node tests/deepseek-browser.mjs",
+    "test:batch-media-browser": "node tests/batch-media-browser.mjs"
   },
   "dependencies": {
     "ffmpeg-static": "^5.3.0",

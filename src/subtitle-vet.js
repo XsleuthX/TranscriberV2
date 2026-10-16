@@ -1,15 +1,21 @@
 import { scan, applyIssues, parseComments } from './vet-core.js';
 import { timedText, replaceTimedWords } from './text-replace.js';
+import {formatAudit,defaultAudit,auditChecks} from './vet-audit.js';
 export { parseComments };
-export const emptyVet = () => ({ options:{uk:true,chinese:'off',contextual:false},rules:[],dismissed:[],log:[],notes:[] });
+export const emptyVet = () => ({ options:{uk:true,chinese:'off',contextual:false,format:false,audit:defaultAudit(),minDuration:.6,maxLines:2},rules:[],dismissed:[],log:[],notes:[] });
 export const vetState = doc => ({...emptyVet(),...(doc.vet||{}),options:{...emptyVet().options,...doc.vet?.options}});
-export const vetPolicy = doc => {const v=vetState(doc);return JSON.stringify({options:v.options,rules:v.rules.filter(r=>r.enabled),notes:v.notes,guidelines:v.guidelines||''});};
+export const vetPolicy = doc => {const v=vetState(doc);return JSON.stringify({options:v.options,checklist:{spelling:v.options.uk?'Bounded US to UK dictionary; preserve names and protected text':'Off unless explicitly requested',contextualWords:v.options.contextual,chinesePunctuation:v.options.chinese,format:v.options.format?{checks:{...defaultAudit(),...v.options.audit},maxChars:doc.rules?.maxChars||42,maxDuration:doc.rules?.maxDur||5.5,charactersPerSecond:doc.rules?.targetCps||17,minDuration:v.options.minDuration,maxLines:v.options.maxLines}:'Off',teamRules:true,aiMeaningGrammarTranslation:true},rules:v.rules.filter(r=>r.enabled),notes:v.notes,guidelines:v.guidelines||''});};
 export async function subtitleFileText(file) {
   const bytes=new Uint8Array(await file.arrayBuffer());
   const encoding=bytes[0]===255&&bytes[1]===254?'utf-16le':bytes[0]===254&&bytes[1]===255?'utf-16be':'utf-8';
   return new TextDecoder(encoding,{fatal:true}).decode(bytes);
 }
 export function validVet(value) {
+  const o=value?.options;
+  if(o?.format!==undefined&&typeof o.format!=='boolean')return false;
+  if(o?.audit!==undefined&&(!o.audit||typeof o.audit!=='object'||Object.entries(o.audit).some(([k,v])=>!Object.hasOwn(auditChecks,k)||typeof v!=='boolean')))return false;
+  if(o?.minDuration!==undefined&&(!Number.isFinite(o.minDuration)||o.minDuration<0||o.minDuration>10))return false;
+  if(o?.maxLines!==undefined&&(!Number.isInteger(o.maxLines)||o.maxLines<1||o.maxLines>10))return false;
   if(value?.guidelines!==undefined&&(typeof value.guidelines!=='string'||value.guidelines.length>32000))return false;
   if(!value || typeof value!=='object' || !value.options || typeof value.options.uk!=='boolean' || typeof value.options.contextual!=='boolean' || !['off','cjk','all'].includes(value.options.chinese)) return false;
   if(!Array.isArray(value.rules)||value.rules.length>1000||!Array.isArray(value.dismissed)||value.dismissed.length>10000||value.dismissed.some(v=>typeof v!=='string') || !Array.isArray(value.log)||value.log.length>500||!Array.isArray(value.notes)||value.notes.some(n=>typeof n!=='string'))return false;
@@ -30,7 +36,7 @@ export function scanVet(doc,assetKey,track,cueText,cueTime) {
   const input={cues:list.map(c=>({id:c.id,current:cueText(c,asset.words||[])}))};
   const cueMap=new Map(list.map((c,i)=>[c.id,{c,i}]));
   const dismissed=new Set(state.dismissed);
-  return scan(input,state.rules,state.options).map(issue=>{
+  const textFlags=scan(input,state.rules,state.options).map(issue=>{
     const {c,i}=cueMap.get(issue.cue), timing=cueTime(c,asset.words||[]),before=cueText(c,asset.words||[]);
     const key=JSON.stringify([assetKey,track,c.id,before,issue.kind,issue.start,issue.from,issue.to]);
     return {...issue,key,assetKey,track,cueId:c.id,cueIndex:i,before,signature:before,startTime:timing.start,endTime:timing.end,
@@ -38,7 +44,12 @@ export function scanVet(doc,assetKey,track,cueText,cueTime) {
       reason:issue.contextual?'Context-dependent spelling. Check the intended meaning.':issue.kind==='chinese'?'Remove this punctuation only if required by your subtitle style.':issue.label,
       suggestion:before.slice(0,issue.start)+issue.to+before.slice(issue.end), ws:c.ws,we:c.we, start:timing.start,end:timing.end,
       offset:issue.start,limit:issue.end};
-  }).filter(f=>!dismissed.has(f.key));
+  });
+  const formatFlags=formatAudit(list.map((c,index)=>({id:c.id,index,text:cueText(c,asset.words||[]),...cueTime(c,asset.words||[])})),state.options,doc.rules).map(f=>{
+    const c=list[f.index],key=JSON.stringify([assetKey,track,f.id,f.text,'format',f.check,f.reason]);
+    return {key,reviewId:key,origin:'vet',kind:'cue',kindOfCheck:'format',presetLabel:'Format · '+auditChecks[f.check],assetKey,track,cueId:f.id,id:f.id,cueIndex:f.index,before:f.text,startTime:f.start,endTime:f.end,start:f.start,end:f.end,ws:c.ws,we:c.we,reason:f.reason,contextual:true};
+  });
+  return [...textFlags,...formatFlags].filter(f=>!dismissed.has(f.key));
 }
 export function dismissVet(doc,issues) {
   const state=vetState(doc);

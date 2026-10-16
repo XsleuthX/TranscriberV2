@@ -1,6 +1,6 @@
 export const AI_PRESETS = [
   { id: 'freeform', label: 'Freeform chat', hint: 'Ask a question or request any text output. Replies stay in the output box.' },
-  { id: 'subtitle_check', label: 'Subtitle Check', hint: 'Flag spelling, punctuation, translation mismatches and readability in Transcript and Subtitle modes.' },
+  { id: 'subtitle_check', label: 'Subtitle Check', hint: 'Use the shared Vet checklist and your natural-language brief. Propose specific cue-linked edits with explanations in Transcript and Subtitle modes; review Apply/Dismiss before changing content.' },
   { id: 'subtitle_polish', label: 'Subtitle Polish', hint: 'Suggest cue text improvements. Review each suggestion before applying; timing stays intact.' },
   { id: 'transcript_check', label: 'Transcript Check', hint: 'Flag suspect words in the transcript and offer word corrections without changing timestamps.' },
   { id: 'timeline_get_clips', label: 'Timeline Get Clips', hint: 'Find punchy, self-contained quotes in Sub A of the active media and add source-linked clips in Timeline.' },

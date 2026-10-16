@@ -35,6 +35,7 @@ jobs:
           npm run test:browser
           npm run test:hosting-browser
           npm run test:transcription-browser
+          npm run test:batch-media-browser
           npm run test:subtitle-quality-browser
           npm run test:subtitle-vet-browser
           npm run test:transcript-copy-browser

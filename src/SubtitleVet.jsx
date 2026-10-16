@@ -1,8 +1,10 @@
+import {spellingCoverage} from './vet-core.js';
+import {auditChecks,defaultAudit} from './vet-audit.js';
 import React,{useState,useRef,useEffect} from 'react';
 import {createPortal} from 'react-dom';
 import {parseComments,ruleList} from './subtitle-vet.js';
 import {occurrences} from './vet-core.js';
-const labels={uk:'UK spelling',chinese:'Chinese punctuation',team:'Team rules'};
+const labels={uk:'UK spelling',chinese:'Chinese punctuation',team:'Team rules',format:'Format audit'};
 const download=(name,data)=>{const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 function Dialog({title,onClose,children}) {
   const ref=useRef();useEffect(()=>{const d=ref.current;d.showModal();return()=>d.close();},[]);
@@ -13,23 +15,23 @@ export function VetCard({flag,onApply,onDismiss,onReveal}) {
   return <article className="vet-card" data-vet-cue={flag.cueId}>
     <button className="vet-seek" onClick={()=>onReveal(flag)}>#{flag.cueIndex+1} · Sub {flag.track} · {flag.startTime.toFixed(2)}s</button>
     <small>{flag.presetLabel}</small>
-    <p className="vet-diff">{flag.before.slice(0,flag.offset)}<del>{flag.from}</del><mark>{flag.to || '∅'}</mark>{flag.before.slice(flag.limit)}</p>
+    {flag.suggestion===undefined?<p className="vet-verbatim">{flag.before}</p>:<p className="vet-diff">{flag.before.slice(0,flag.offset)}<del>{flag.from}</del><mark>{flag.to || '∅'}</mark>{flag.before.slice(flag.limit)}</p>}
     <p>{flag.reason}</p>
     <details><summary>Before / after</summary><p className="vet-verbatim">{flag.before}</p><p className="vet-verbatim">{flag.suggestion}</p></details>
-    <div className="vet-actions"><button className="btn sm pri" onClick={()=>onApply([flag])}>Apply</button><button className="btn sm" onClick={()=>onDismiss([flag])}>Dismiss</button><button className="btn sm" onClick={()=>onReveal(flag,true)}>Open in editor</button></div>
+    <div className="vet-actions"><button className="btn sm pri" disabled={flag.suggestion===undefined} onClick={()=>onApply([flag])}>Apply</button><button className="btn sm" onClick={()=>onDismiss([flag])}>Dismiss</button><button className="btn sm" onClick={()=>onReveal(flag,true)}>Open in editor</button></div>
   </article>;
 }
 export function VetIssues({flags,...handlers}) {
   return <div className="paper vet-issues" aria-label="Vetting issues">{flags.length?flags.map(f=><VetCard key={f.key} flag={f} {...handlers}/>):<p className="hint">No pending suggestions in this scope.</p>}</div>;
 }
-export default function SubtitleVet({open,onToggle,only,onOnly,state,onState,flags,scope,scopeKey,onReveal,onApply,onDismiss,onUndo,canUndo,cues,report,disabled,category,onCategory,dual,track,onTrack}) {
+export default function SubtitleVet({open,onToggle,only,onOnly,state,onState,flags,scope,scopeKey,onReveal,onApply,onDismiss,onUndo,canUndo,cues,report,disabled,category,onCategory,dual,track,onTrack,cueRules={}}) {
   const [panel,setPanel]=useState(null),[selected,setSelected]=useState(null),[preview,setPreview]=useState(null),[message,setMessage]=useState('');
   const [comments,setComments]=useState(''),[from,setFrom]=useState(''),[to,setTo]=useState(''),[note,setNote]=useState('');
   const [matchCase,setMatchCase]=useState(true),[whole,setWhole]=useState(false),[preserve,setPreserve]=useState(false);
   const input=useRef();
   useEffect(()=>{setSelected(null);setPreview(null);setPanel(null);},[scopeKey]);
   const visible=flags.filter(f=>category==='all'||f.kindOfCheck===category);
-  const current=visible.find(f=>f.key===selected), bulk=visible.filter(f=>!f.contextual);
+  const current=visible.find(f=>f.key===selected), bulk=visible.filter(f=>!f.contextual&&typeof f.suggestion==='string');
   const pick=delta=>{if(!visible.length)return;const index=visible.findIndex(f=>f.key===selected);const f=visible[(index+delta+visible.length)%visible.length];setSelected(f.key);onReveal(f);};
   const patch=change=>onState({...state,...change});
   const addRules=rules=>{if(state.rules.length+rules.length>1000)throw new Error('Keep at most 1000 rules.');patch({rules:[...state.rules,...rules]});};
@@ -41,7 +43,7 @@ export default function SubtitleVet({open,onToggle,only,onOnly,state,onState,fla
   .vet-card{padding:12px;border-bottom:1px solid #dde2dd;background:white;text-align:left;min-width:0}.vet-card>small{display:block;color:#657165;font-size:10px;margin:5px 0}.vet-seek{color:#326152;background:none;border:0;font:inherit;cursor:pointer}
   .vet-card p{font-size:12px;line-height:1.65;margin:6px 0;overflow-wrap:anywhere}.vet-diff,.vet-verbatim{white-space:pre-wrap}.vet-diff del{background:#fbe4df;color:#8e3e32}.vet-diff mark{background:#dfefdc;padding:1px 2px}.vet-card details{font-size:11px}.vet-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
   .vet-issues{overflow:auto;flex:1;padding:10px!important}.vet-issues .vet-card{margin-bottom:8px;border:1px solid #dce1dc;border-radius:6px}
-  .vet-dialog{font:13px Inter,'Segoe UI',sans-serif;color:#27362c;background:white;border:1px solid #ccd4cc;border-radius:10px;width:min(640px,90vw);max-height:80vh;overflow:auto;padding:18px;box-sizing:border-box}.vet-dialog::backdrop{background:#0005}.vet-dialog header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.vet-dialog nav{display:flex;gap:8px;margin-bottom:14px}.vet-dialog label{display:block;margin:12px 0}.vet-dialog input[type=text],.vet-dialog textarea{display:block;box-sizing:border-box;width:100%;padding:8px;margin-top:5px;border:1px solid #bbc8bc;border-radius:4px;font:inherit}.vet-dialog select{font:inherit}.vet-dialog small{display:block;color:#687468;margin:5px 0}.vet-dialog .vet-rule{border-top:1px solid #ddd;padding:10px 0}.vet-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere}.vet-dialog button{cursor:pointer}.vet-dialog .vet-check{display:flex;gap:6px;align-items:center}.vet-dialog .vet-notes{white-space:pre-wrap;padding:8px;background:#fff5df}.vet-dialog .vet-history{border-top:1px solid #ddd;padding:8px 0}
+  .vet-dialog{font:13px Inter,'Segoe UI',sans-serif;color:#27362c;background:white;border:1px solid #ccd4cc;border-radius:10px;width:min(640px,90vw);max-height:80vh;overflow:auto;padding:18px;box-sizing:border-box}.vet-dialog::backdrop{background:#0005}.vet-dialog header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.vet-dialog nav{display:flex;gap:8px;margin-bottom:14px}.vet-dialog label{display:block;margin:12px 0}.vet-dialog input[type=text],.vet-dialog textarea{display:block;box-sizing:border-box;width:100%;padding:8px;margin-top:5px;border:1px solid #bbc8bc;border-radius:4px;font:inherit}.vet-dialog select{font:inherit}.vet-dialog small{display:block;color:#687468;margin:5px 0}.vet-dialog .vet-rule{border-top:1px solid #ddd;padding:10px 0}.vet-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere}.vet-dialog button{cursor:pointer}.vet-dialog .btn.pri{background:#2676e8;color:white}.vet-dialog .btn:disabled{opacity:.45}.vet-dialog .vet-check{display:flex;gap:6px;align-items:center}.vet-dialog .vet-notes{white-space:pre-wrap;padding:8px;background:#fff5df}.vet-dialog .vet-history{border-top:1px solid #ddd;padding:8px 0}
   `}</style><div className="vet-bar" role="toolbar" aria-label="Subtitle vetting">
     <strong>Vet · {flags.length} issues</strong>
     {open&&<><small>{scope}</small>{dual&&<select aria-label="Vet subtitle track" value={track} onChange={e=>onTrack(e.target.value)}><option value="A">Sub A</option><option value="B">Sub B</option></select>}<button className="btn sm" disabled={!visible.length} onClick={()=>pick(-1)}>Previous issue</button><button className="btn sm" disabled={!visible.length} onClick={()=>pick(1)}>Next issue</button>
@@ -56,7 +58,13 @@ export default function SubtitleVet({open,onToggle,only,onOnly,state,onState,fla
   {open&&<div aria-label="Vet suggestions">{visible.slice(0,100).map(f=><VetCard key={f.key} flag={f} onApply={onApply} onDismiss={onDismiss} onReveal={onReveal}/>)}{visible.length>100&&<p>Showing first 100 suggestions. Use Next issue for navigation.</p>}</div>}
   {panel&&<Dialog title="Subtitle vet settings" onClose={()=>setPanel(null)}><nav>{['checks','rules','history'].map(p=><button className={'btn sm'+(panel===p?' pri':'')} key={p} onClick={()=>{setPanel(p);setMessage('');}}>{p==='rules'?'Team rules':p[0].toUpperCase()+p.slice(1)}</button>)}</nav>
     {message&&<p role="status">{message}</p>}
-    {panel==='checks'&&<><label><input type="checkbox" checked={state.options.uk} onChange={e=>patch({options:{...state.options,uk:e.target.checked}})}/>Suggest UK spelling (−ise)</label>
+    {panel==='checks'&&<><h3>Audit checklist</h3><p>Checks run on the selected media and track. Every change requires Apply; format findings are advisory flags.</p><details><summary>US → UK spelling: {spellingCoverage().count} exact dictionary entries</summary><p>Whole Latin words, case preserved. House style favours −ise. This is a bounded spelling list, not a complete English spellchecker. Names and context need human or AI review. There is no automatic UK → US conversion.</p><p>Protected: URLs, email, numbers, Dr./Mr./Mrs./Ms./Prof., contractions, hyphenated words and subtitle markup. Team literal replacements can target protected content intentionally, except markup.</p><div style={{maxHeight:180,overflow:'auto'}}>{spellingCoverage().entries.map(e=><div key={e.from}>{e.from} → {e.to}{spellingCoverage().contextual.includes(e.from)?' · individual context review':''}</div>)}</div></details>
+      <label><input type="checkbox" aria-label="Enable format audit" checked={!!state.options.format} onChange={e=>patch({options:{...state.options,format:e.target.checked}})}/>Enable local format audit</label>
+      {Object.entries(auditChecks).map(([key,label])=><label key={key}><input type="checkbox" aria-label={'Audit '+label} disabled={!state.options.format} checked={{...defaultAudit(),...state.options.audit}[key]} onChange={e=>patch({options:{...state.options,audit:{...defaultAudit(),...state.options.audit,[key]:e.target.checked}}})}/>{label}</label>)}
+      <p>Limits from Cue rules: {cueRules.maxChars||42} characters/line · {cueRules.maxDur||5.5}s maximum · {cueRules.targetCps||17} visible non-space characters/s. Format audit does not rewrite timecodes or insert line breaks.</p>
+      <label>Minimum duration (seconds)<input type="number" aria-label="Audit minimum duration" min="0" max="10" step="0.1" value={state.options.minDuration??.6} onChange={e=>patch({options:{...state.options,minDuration:Math.min(10,Math.max(0,Number(e.target.value)))}})}/></label>
+      <label>Maximum lines per cue<input type="number" aria-label="Audit maximum lines" min="1" max="10" value={state.options.maxLines||2} onChange={e=>patch({options:{...state.options,maxLines:Math.min(10,Math.max(1,Math.round(Number(e.target.value))))}})}/></label>
+      <p>AI-only review: grammar, meaning, translation consistency and your natural-language brief. Text vetting cannot verify pronunciation, omissions against audio or frame-accurate alignment. Raw SRT file syntax/numbering is not part of this project-cue audit.</p><label><input type="checkbox" checked={state.options.uk} onChange={e=>patch({options:{...state.options,uk:e.target.checked}})}/>Suggest UK spelling (−ise)</label>
       <label><input type="checkbox" checked={state.options.contextual} onChange={e=>patch({options:{...state.options,contextual:e.target.checked}})}/>Include context-dependent spellings</label><small>Program, check, licence/license and meter need individual review. They are excluded from bulk application.</small>
       <label>Chinese punctuation <select aria-label="Chinese punctuation policy" value={state.options.chinese} onChange={e=>patch({options:{...state.options,chinese:e.target.value}})}><option value="off">Off</option><option value="cjk">Suggest removing Chinese punctuation</option><option value="all">Suggest removing punctuation on Chinese lines</option></select></label>
       <small>Numbers, URLs, email addresses, common honorifics, contractions and formatting tags are protected. All changes require Apply.</small><p>Checks run locally. No API key or transcription is needed.</p></>}

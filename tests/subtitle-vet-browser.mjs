@@ -95,9 +95,11 @@ try {
    return r.fulfill({json:{content:[{type:'text',text:JSON.stringify({flags:[{target:items[0].target,reason:'Apply the team terminology in context.',suggestion:'My preferred colour.'}]})}]}});
  });
  await page.getByRole('button',{name:'Configure AI vet…',exact:true}).click();
+ const brief='Replace favourite with preferred, preserve Dr. Lotus, and flag each edit on its cue.';
+ await page.locator('.drawer-body textarea').fill(brief);
  await page.getByRole('button',{name:'Run',exact:true}).click();
  await expect(page.getByLabel('AI review flags').getByRole('button',{name:'Apply suggestion',exact:true})).toBeVisible();
- expect(request).toContain('Retain Dr. Lotus');expect(request).toContain('brand shade');expect(request).toContain('context');
+ expect(request).toContain('Retain Dr. Lotus');expect(request).toContain('brand shade');expect(request).toContain('context');expect(request).toContain(brief);expect(request).toContain('checklist');
  await page.getByRole('button',{name:'Open Vet panel',exact:true}).click();
  const aiFlags=page.getByLabel('Vet AI suggestions');
  await aiFlags.getByRole('button',{name:'Apply suggestion',exact:true}).click();
@@ -109,6 +111,15 @@ try {
  await settings.getByRole('button',{name:'Team rules',exact:true}).click();await settings.getByLabel('AI vet guidelines').fill('A revised team policy');
  await settings.getByRole('button',{name:'Close vet dialog',exact:true}).click();
  await expect(aiFlags.getByRole('button',{name:'Apply suggestion',exact:true})).toBeDisabled();
+ const beforeFormat=(await asset()).cues;
+ await bar.getByRole('button',{name:'Vet settings',exact:true}).click();settings=page.getByRole('dialog',{name:'Subtitle vet settings'});
+ await expect(settings).toContainText('153 exact dictionary entries');
+ await settings.getByLabel('Enable format audit').check();await settings.getByLabel('Audit minimum duration').fill('4');
+ await page.screenshot({path:process.env.AUDIT_SCREENSHOT||'.test-temp/vet-checklist.png'});
+ await settings.getByRole('button',{name:'Close vet dialog',exact:true}).click();await bar.getByLabel('Vet category').selectOption('format');
+ const formatCards=page.getByLabel('Vet suggestions',{exact:true}).locator('.vet-card');
+ await expect(formatCards).toHaveCount(3);await expect(formatCards.first().getByRole('button',{name:'Apply',exact:true})).toBeDisabled();
+ expect((await asset()).cues).toEqual(beforeFormat);
  expect(errors).toEqual([]);
  console.log('Vet browser checks passed: compact hints, apply/dismiss, bulk preview/Undo, A/B Dual isolation, Transcript synchronisation, protected punctuation, team notes/coverage, reload, report download, source isolation, local checks without requests, and mocked contextual AI vet/policy staleness.');
 } finally {await browser.close();}

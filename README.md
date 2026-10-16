@@ -1,4 +1,4 @@
-# Transcriber v2.36.1 - current DeepSeek API and container startup fix
+# Transcriber v2.37 - audit checklist and batch workflows
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
@@ -374,3 +374,11 @@ Transcript and Subtitle modes have compact **Find** and **Vet** toolbar buttons.
 
 **Copy transcript** copies the complete active transcript from project data, including offscreen paragraphs. Ctrl/Cmd+A then Ctrl/Cmd+C does the same when outside text editors. There is no application character cap. **Download transcript TXT** saves the complete text when clipboard access is unavailable. Native selection within editable fields remains unchanged.
 
+
+## Audit checklist and batch workflows in v2.37
+
+See [AUDIT-CHECKLIST.md](AUDIT-CHECKLIST.md) for all 153 spelling mappings, protected content, the optional format audit thresholds and natural-language AI Subtitle Check. All proposed edits remain reviewable.
+
+Multi-file imports now prepare audio sequentially and show per-source status. In Transcribe, expand Batch transcribe media, select eligible sources and Start batch transcription. Existing transcripts require explicit replacement opt-in. The queue continues after per-file errors and supports cancellation; keep the tab open. API calls are billed normally.
+
+Story Suggestion creates editable, source-linked sample cards, avoids overlapping quote repetition, bounds shortlist reduction and preserves concurrent Story edits. See [v2.37 release notes](CHANGELOG-v2.37.md).
