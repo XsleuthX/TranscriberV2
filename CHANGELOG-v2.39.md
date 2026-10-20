@@ -1,0 +1,7 @@
+# Transcriber v2.39 — Story document layout
+
+Story Assembly uses a continuous numbered table rather than nested rounded cards. A wide Script column puts the shot-type pill, plain filename, timecodes and larger Chinese/English cue text in the same reading order as a production script. Studio is available as a shot label; existing/custom labels remain intact. Table rules, writing space and typography carry the hierarchy. Repeated source footers are replaced with brief linkage status. Controls appear on hover and keyboard focus; missing sources remain visibly flagged. Existing notes open with their cards.
+
+Audio is optional: stories with audio items show it automatically until the user explicitly toggles its visibility. Hidden content remains in the project and its count stays visible. Preference survives autosave and Project JSON. Audio stacks below Script in narrow panels. Row controls move into the number gutter and work with Audio hidden; sections do not consume row numbers. Source selection, cue preview, text editing, timecode controls, reordering, references and Undo retain their existing behavior.
+
+Browser coverage exercises wide/narrow layout, audio visibility/persistence/content, source preview, Studio label/Undo, numbering and reordering. Existing Story editing/assembly and general editor regressions remain in CI. A production screenshot is generated for visual inspection.

@@ -1,3 +1,4 @@
+import './story-document.css';
 import { editTranscript } from './transcript-edit.js';
 import BatchTranscribe from './BatchTranscribe.jsx';
 import {serialScheduler,transcribeQueue,cacheAudio} from './media-queue.js';
@@ -455,7 +456,7 @@ function buildSecondWords() {
 }
 const SPEAKERS = { S1: { name: "Archivist", color: "#35A7B8" }, S2: { name: "Interviewer", color: "#C4456B" } };
 const DEFAULT_RULES = { maxChars: 42, maxDur: 5.5, gapBreak: 0.7, targetCps: 17 };
-const SHOT_LABELS = ["Main Shot", "B-Roll", "Cutaway", "Interview", "Archive"];
+const SHOT_LABELS = ["Main Shot", "B-Roll", "Cutaway", "Interview", "Archive", "Studio"];
 const CAPTION_TYPES = ["Lower Third", "Title Card", "Subtitle", "Credit"];
 const AUDIO_KINDS = [["vo", "VO 旁白", "A3"], ["music", "Music 音乐", "A4"], ["sfx", "SFX 音效", "A2"]];
 const KIND_COLOR = { cue: "#35A7B8", clip: "#7A5CB8", caption: "#C9973F", generic: "#828B98", audio: "#6FA35C" };
@@ -1348,6 +1349,9 @@ export default function Transcriber() {
   // actually read all day gets as large as you want.
   const [uiZoom, setUiZoom] = useState(1);
   const [docSize, setDocSize] = useState(17);
+  const [storyAudio, setStoryAudio] = useState(null);
+  const storyAudioCount=rows.reduce((n,row)=>n+row.cards.filter(c=>c.col==='audio').length,0);
+  const storyAudioVisible=storyAudio??(storyAudioCount>0);
   const [poolOpenV, setPoolOpenV] = useState(true);
   // Explanatory copy is off by default — it was the loudest thing in the rail.
   const [showHelp, setShowHelp] = useState(false);
@@ -1525,6 +1529,7 @@ export default function Transcriber() {
       if (validVet(doc.vet)) setVet(doc.vet);
       if (doc.activeAsset && doc.media?.[doc.activeAsset]) setActiveAsset(doc.activeAsset);
       if (doc.ui) {
+        if (typeof doc.ui.storyAudio === 'boolean') setStoryAudio(doc.ui.storyAudio);
         if (doc.ui.docSize) setDocSize(doc.ui.docSize);
         if (doc.ui.uiZoom) setUiZoom(doc.ui.uiZoom);
         if (doc.ui.projectName) setProjectName(doc.ui.projectName);
@@ -1548,12 +1553,12 @@ export default function Transcriber() {
     const t = setTimeout(() => {
       if (importingProject.current) return;
       saveProject({ media: serialisable(media), rows, mtl, rules, reviews, vet, activeAsset,
-        ui: { docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime }, v: 1 })
+        ui: { storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime }, v: 1 })
         .then(() => setSaved("saved"))
         .catch(() => setSaved("error"));
     }, 900);
     return () => clearTimeout(t);
-  }, [media, rows, mtl, rules, reviews, vet, activeAsset, restored, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime]);
+  }, [media, rows, mtl, rules, reviews, vet, activeAsset, restored, storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime]);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2800); return () => clearTimeout(t); }, [toast]);
   useEffect(() => {
@@ -3591,7 +3596,7 @@ export default function Transcriber() {
   const baseName = () => (cur.name || "captions").replace(/\.[^.]+$/, "");
   const exportProjectFile = () => {
     try {
-      const json = exportProjectJSON({ ...history.current, activeAsset, ui: { projectName, docSize, uiZoom, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime } });
+      const json = exportProjectJSON({ ...history.current, activeAsset, ui: { storyAudio, projectName, docSize, uiZoom, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime } });
       save((projectName || 'Transcriber project').replace(/[<>:"/\\|?*]/g, '_') + '.transcriber.json', json, 'application/json');
       setToast('Project exported with cached audio. Relink videos or reconnect Iconik after importing.');
     } catch (error) { setToast('Project export failed: ' + error.message); }
@@ -4230,15 +4235,17 @@ export default function Transcriber() {
           {ws === "story" && (
             <div className="storywrap">
               <div className="storydoc">
-                <h1 className="docttl">Story assembly</h1>
-                <p className="docsub">
-                  Two-column AV script. Left column carries picture, right carries sound.
-                  Everything here is editable in place.
-                </p>
-                <div className="tbl">
-                  <div className="thead"><div>#</div><div>Visuals</div><div>Audio</div></div>
+                <div className="story-heading"><h1 className="docttl">Story assembly</h1>
+                  <button className="story-audio-toggle" aria-label="Audio column" aria-pressed={storyAudioVisible}
+                    title={storyAudioVisible?'Hide audio column':'Show audio column'} onClick={()=>setStoryAudio(!storyAudioVisible)}>
+                    <Volume2 size={14}/> Audio {storyAudioCount>0&&<span className="count">{storyAudioCount}</span>}
+                  </button>
+                </div>
+                <p className="docsub">Click a line to preview its source. Edit text directly in the script.</p>
+                <div className={'tbl'+(storyAudioVisible?' with-audio':'')} aria-label="Story assembly document" data-audio-visible={storyAudioVisible}>
+                  <div className="thead"><div>#</div><div>Script</div>{storyAudioVisible&&<div className="audio-heading">Audio</div>}</div>
                   {rows.map((row, ri) => (
-                    <StoryRow key={row.id} row={row} ri={ri} cues={cues} words={words}
+                    <StoryRow key={row.id} row={row} ri={ri} number={rows.slice(0,ri+1).filter(r=>!r.isSection).length} showAudio={storyAudioVisible} cues={cues} words={words}
                       activeCard={activeCard} over={overRow === row.id}
                       onDragStart={() => setDragRow(row.id)}
                       onDragOver={() => setOverRow(row.id)}
@@ -4287,7 +4294,7 @@ export default function Transcriber() {
                         setTcPop({ anchor: el, rowId: row.id, card: { ...card, sin: range.start, sout: range.end }, live })}
                       onDeleteCard={(cardId) => deleteCard(row.id, cardId)}
                       onSeek={storySeek}
-                      onAdd={(col) => setModal({ kind: "add", rowId: row.id, col })}
+                      onAdd={(col) => {if(col==='audio')setStoryAudio(true);setModal({ kind: "add", rowId: row.id, col });}}
                       onPatchRow={(p) => setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, ...p } : r)))}
                       onMoveRow={(d) => setRows((rs) => {
                         const i = rs.findIndex((r) => r.id === row.id), j = i + d;
@@ -7069,7 +7076,7 @@ function ClipPreview({ clip, videoUrl, cues, words, onClose }) {
 /* ═══ story doc table ═══════════════════════════════════════════════════ */
 
 function StoryRow({
-  row, ri, cues, words, activeCard, over, onDragStart, onDragOver, onDrop,
+  row, ri, number=ri+1, showAudio=true, cues, words, activeCard, over, onDragStart, onDragOver, onDrop,
   onSelectCard, onPatchCard, onCommitBody, onCommitCue, onDropCue, onDeleteCard, onMoveCard,
   onCueCtx, onNudge,
   onSeek, onAdd, onPatchRow, onMoveRow, onDeleteRow, assets, activeAsset, onOpenTc,
@@ -7091,13 +7098,19 @@ function StoryRow({
       </div>
     );
 
-  const cols = [["video", "Visuals"], ["audio", "Audio"]];
+  const cols = showAudio?[["video", "Script"], ["audio", "Audio"]]:[["video", "Script"]];
   return (
-    <div className={`trow${over ? " drop" : ""}`}
+    <div className={`trow${over ? " drop" : ""}`} data-story-row={row.id}
       onDragOver={(e) => { e.preventDefault(); onDragOver(); }} onDrop={onDrop}>
-      <div className="tnum" draggable onDragStart={onDragStart} title="Drag to reorder this row">{ri + 1}</div>
+      <div className="tnum" draggable onDragStart={onDragStart} title="Drag to reorder this row"><span className="story-row-number">{number}</span>
+        <div className="storyrow-tools" onClick={e=>e.stopPropagation()}>
+          <button title="Move row up" aria-label="Move row up" onClick={()=>onMoveRow(-1)}><ChevronUp size={13}/></button>
+          <button title="Move row down" aria-label="Move row down" onClick={()=>onMoveRow(1)}><ChevronDown size={13}/></button>
+          <button title="Delete row" aria-label="Delete row" onClick={onDeleteRow}><Trash2 size={12}/></button>
+        </div>
+      </div>
       {cols.map(([col]) => (
-        <div className={`tcell${overCell === col ? " dropcell" : ""}`} key={col}
+        <div className={`tcell${overCell === col ? " dropcell" : ""}${!row.cards.some(c=>(c.col||"video")===col)?" empty":""}`} key={col} data-column={col}
           onDragOver={(e) => {
             if (!cardDrag) return;
             e.preventDefault(); e.stopPropagation(); setOverCell(col);
@@ -7126,15 +7139,9 @@ function StoryRow({
               onSeek={t => onSeek(t, c.assetKey)} />
           ))}
           <button className="addbtn" onClick={() => onAdd(col)}>
-            <Plus size={11} /> {col === "audio" ? "Audio" : "Visuals"}
+            <Plus size={11} /> {col === "audio" ? "Audio" : "Script"}
           </button>
-          {col === "audio" && (
-            <div className="rowtools">
-              <button className="dcacts" style={{ opacity: 1 }} title="Move row up" onClick={() => onMoveRow(-1)}><ChevronUp size={12} /></button>
-              <button className="dcacts" style={{ opacity: 1 }} title="Move row down" onClick={() => onMoveRow(1)}><ChevronDown size={12} /></button>
-              <button className="dcacts" style={{ opacity: 1 }} title="Delete row" onClick={onDeleteRow}><Trash2 size={12} /></button>
-            </div>
-          )}
+
         </div>
       ))}
     </div>
@@ -7146,7 +7153,7 @@ function DocCard({
   onCueCtx, onNudge,
   assets, activeAsset, onOpenTc, onDragStart, cuesOf, wordsOf,
 }) {
-  const [notes, setNotes] = useState(false);
+  const [notes, setNotes] = useState(!!c.notes);
 
   // A card ALWAYS resolves against its own asset's cues, never the active
   // asset's. That is what lets Story stay coherent while the user switches
@@ -7166,7 +7173,7 @@ function DocCard({
     : { start: c.sin ?? 0, end: c.sout ?? 0 };
 
   return (
-    <div className={`dcard${on ? " on" : ""}`} data-card-id={c.id} onClick={onSelect}>
+    <div className={`dcard${on ? " on" : ""}`} data-card-id={c.id} data-shot={c.label} onClick={onSelect}>
       <div className="kb" style={{ background: KIND_COLOR[c.kind] }} />
 
       {/* Only this handle starts a card drag — dragging the body would make
@@ -7180,9 +7187,9 @@ function DocCard({
         {c.kind === "caption"
           ? <span className="dtag">{c.label}</span>
           : (
-            <select className="dsel" value={c.label} onClick={(e) => e.stopPropagation()}
+            <select className="dsel" aria-label="Shot type" value={c.label} onClick={(e) => e.stopPropagation()}
               onChange={(e) => onPatch({ label: e.target.value })}>
-              {SHOT_LABELS.map((l) => <option key={l}>{l}</option>)}
+              {[...new Set([...SHOT_LABELS,c.label].filter(Boolean))].map((l) => <option key={l}>{l}</option>)}
             </select>
           )}
         <div className="dcacts">
@@ -7201,14 +7208,15 @@ function DocCard({
       {/* Footage source. Switching it re-binds the card; Unlinked keeps refs
           remembered so the card can be restored later. */}
       <div className="dsrc">
-        <select className={onSource && !isActive ? "off" : ""} value={c.assetKey || ""}
+        <select aria-label="Footage source" className={missing?"missing":onSource && !isActive ? "off" : ""} value={c.assetKey || ""}
           title={!c.assetKey ? "Unlinked from any footage"
             : !isActive ? "Linked to footage that is not the active source — still resolves"
             : assetLabel(asset)}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => onPatch({ assetKey: e.target.value || null })}>
           <option value="">Unlinked</option>
-          {assets.map((a) => <option key={a.key} value={a.key}>{assetLabel(a)}</option>)}
+          {missing&&<option value={c.assetKey}>Missing source — reconnect footage</option>}
+          {assets.map((a) => <option key={a.key} value={a.key}>{a.name}</option>)}
         </select>
       </div>
 
@@ -7280,13 +7288,13 @@ function DocCard({
           onChange={(e) => onPatch({ notes: e.target.value })} />
       )}
 
-      <div className="dfoot">
+      <div className={"dfoot"+(missing?" has-warning":"")}>
         <span>
           {!c.assetKey ? "Unlinked"
             : missing ? "Missing source — re-import or re-point"
-            : live ? `${assetLabel(asset)} · live cue refs: ${linked.length}${isActive ? "" : " · other source"}`
-            : c.kind === "caption" ? `${assetLabel(asset)} · caption`
-            : `${assetLabel(asset)} · manual card`}
+            : live ? `${linked.length} linked cue${linked.length===1?"":"s"}`
+            : c.kind === "caption" ? "Caption"
+            : "Manual text"}
           {!live && (c.sourceCueRefs || []).length > 0 ? ` · ${c.sourceCueRefs.length} remembered` : ""}
         </span>
         {onSource && !isActive && (

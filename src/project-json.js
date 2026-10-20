@@ -126,6 +126,7 @@ export function importProjectJSON(text) {
     if (Number.isFinite(p.ui[field]) && p.ui[field] >= min && p.ui[field] <= max) ui[field] = p.ui[field];
   if (['transcript', 'subtitle', 'timeline', 'story', 'multi'].includes(p.ui.ws)) ui.ws = p.ui.ws;
   if (['A', 'B', 'DUAL'].includes(p.ui.track)) ui.track = p.ui.track;
+  if (typeof p.ui.storyAudio === 'boolean') ui.storyAudio = p.ui.storyAudio;
   if (typeof p.ui.mtlSnap === 'boolean') ui.mtlSnap = p.ui.mtlSnap;
   if (typeof p.ui.priming === 'boolean') ui.priming = p.ui.priming;
   if (p.ui.dictionary) ui.dictionary = Object.fromEntries(['asr','tr'].map(field =>

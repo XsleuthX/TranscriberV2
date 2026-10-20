@@ -1,4 +1,4 @@
-# Transcriber v2.38 - Transcript sync and broader UK spelling
+# Transcriber v2.39 - Story document layout
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
@@ -387,3 +387,9 @@ Story Suggestion creates editable, source-linked sample cards, avoids overlappin
 ## v2.38 editing and spelling
 
 Transcript paragraph edits now synchronise Sub A, including imported/pinned cues, regardless of the last selected subtitle track. Changes retain source timing, cue identity, B translations and linked Story/Timeline references in one Undo action. Separately rewritten cues that cannot be mapped safely are retained with a review notice. Local spelling now covers 1161 explicit mappings from 165 allowed −ise verb families and other variants; no blanket z-to-s replacement. Vet settings includes Team Rules examples. See [audit and usage details](AUDIT-CHECKLIST.md).
+
+## v2.39 Story document
+
+Story now uses a wide script table inspired by a working production document: numbered rows, shot-type pills (including Studio), filenames, timecodes and larger cue text. Nested card frames and repeated filenames are removed. Card/row controls appear on hover or keyboard focus, and cue clicks continue to preview their linked source. Existing source bindings, text edits, drag/drop, timecode editing, notes and Undo remain available.
+
+The **Audio** button shows/hides the optional audio column. Audio appears automatically for a story containing audio items until you choose a visibility preference. Hiding Audio retains its content; the button shows the item count. The preference saves with the project and JSON export. At narrow document widths Audio stacks below Script. Section headings are excluded from row numbering.

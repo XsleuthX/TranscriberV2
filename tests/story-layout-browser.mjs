@@ -1,0 +1,68 @@
+import {chromium,expect} from '@playwright/test';
+const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL==='chromium'?{}:{channel:process.env.BROWSER_CHANNEL||'msedge'})});
+try {
+  const page=await browser.newPage({viewport:{width:1800,height:1250}}),errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.route('**/api/keys',r=>r.fulfill({json:{}}));
+  await page.goto(process.env.APP_URL||'http://localhost:4173');
+  const read=()=>page.evaluate(async()=>{
+    const db=await new Promise(resolve=>{const r=indexedDB.open('transcriber',1);r.onsuccess=()=>resolve(r.result);});
+    const doc=await new Promise(resolve=>{const r=db.transaction('projects').objectStore('projects').get('current');r.onsuccess=()=>resolve(r.result);});db.close();return doc;
+  });
+  await expect.poll(async()=>!!(await read())?.mtl).toBe(true);
+  const base=await read();
+  const lines=[['过去已经失火爆炸了好几次','每一次失败的成本','据说都是5000万美元起跳'],['火箭这么昂贵，又有这么高的风险','美国和中国他们玩得起','那我们新加坡这样的小国','有实力去研发火箭吗？'],['欸，这里真有一群敢冒险的人','在研究火箭技术']];
+  const words=lines.flat().map((t,i)=>({i,t,s:20+i*3,e:22+i*3,sp:'S1'}));
+  const cues=words.map((w,i)=>({id:'c'+i,ws:i,we:i,textOverride:w.t,startOverride:w.s,endOverride:w.e}));
+  let at=0;
+  const rows=lines.map((group,index)=>{const mine=cues.slice(at,at+group.length);at+=group.length;return {id:'r'+index,label:'Story '+index,cards:[{id:'card'+index,kind:'cue',col:'video',label:'Studio',title:'',notes:'',assetKey:'studio',cueRefs:mine.map(c=>c.id),sourceCueRefs:mine.map(c=>c.id),sin:mine[0].startOverride,sout:mine.at(-1).endOverride}]};});
+  rows.splice(1,0,{id:'section',isSection:true,label:'Section',sectionLabel:'The question',cards:[]});
+  const source={name:'Studio_20260316_CAM_01.mov',type:'local',url:null,offline:true,duration:90,words,cues,cuesB:[],clips:[]};
+  const fixture={...base,media:{studio:source,interview:{...source,name:'Interview_20260317_CAM_02.mov'}},rows,activeAsset:'studio',ui:{...base.ui,ws:'story',track:'A'}};
+  await page.evaluate(async doc=>{const db=await new Promise(resolve=>{const r=indexedDB.open('transcriber',1);r.onsuccess=()=>resolve(r.result);});await new Promise(resolve=>{const tx=db.transaction('projects','readwrite');tx.objectStore('projects').put(doc,'current');tx.oncomplete=resolve;});db.close();},fixture);
+  await page.reload();await page.keyboard.press('F4');
+  const audio=page.getByRole('button',{name:'Audio column',exact:true});
+  await expect(audio).toHaveAttribute('aria-pressed','false');
+  await expect(page.locator('.story-row-number')).toHaveText(['1','2','3']);
+  await expect(page.locator('[data-column=audio]')).toHaveCount(0);
+  const first=page.locator('[data-card-id=card0]');
+  await expect(first.getByLabel('Shot type')).toHaveValue('Studio');
+  await expect(first.getByLabel('Footage source').locator('option:checked')).toHaveText(source.name);
+  await expect(first.locator('.dbody [data-story-cue]')).toHaveText(lines[0]);
+  const cell=await first.boundingBox();expect(cell.width).toBeGreaterThan(650);
+  expect(await first.evaluate(el=>getComputedStyle(el).borderRadius)).toBe('0px');
+  expect(await first.locator('.dbody').evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(17);
+  await page.locator('.storydoc').screenshot({path:process.env.STORY_SCREENSHOT||'.test-temp/story-document.png'});
+  await audio.click();await expect(page.locator('[data-column=audio]')).toHaveCount(3);
+  const picture=await page.locator('[data-story-row=r0] [data-column=video]').boundingBox(),sound=await page.locator('[data-story-row=r0] [data-column=audio]').boundingBox();expect(picture.width).toBeGreaterThan(sound.width);
+  await page.locator('[data-story-row=r0] [data-column=audio]').getByRole('button',{name:'Audio',exact:true}).click();
+  await page.locator('.addrow').filter({hasText:'VO 旁白'}).click();
+  await expect.poll(async()=>(await read()).rows[0].cards.filter(c=>c.col==='audio').length).toBe(1);
+  await page.locator('[data-column=audio] .dbody').fill('VO: A question worth asking.');await page.keyboard.press('Tab');
+  await expect.poll(async()=>(await read()).rows[0].cards.find(c=>c.col==='audio').body).toBe('VO: A question worth asking.');
+  await page.locator('.storydoc').screenshot({path:'.test-temp/story-document-audio.png'});
+  await audio.click();await expect(page.locator('[data-column=audio]')).toHaveCount(0);
+  await expect.poll(async()=>(await read()).ui.storyAudio).toBe(false);
+  await page.reload();await page.keyboard.press('F4');await expect(audio).toHaveAttribute('aria-pressed','false');
+  await audio.click();await expect(page.locator('[data-column=audio] .dbody')).toHaveText('VO: A question worth asking.');
+  await first.getByLabel('Shot type').selectOption('B-Roll');
+  await expect.poll(async()=>(await read()).rows[0].cards[0].label).toBe('B-Roll');
+  await page.getByRole('button',{name:/Undo/}).first().click();await expect(first.getByLabel('Shot type')).toHaveValue('Studio');
+  // Row controls work with Audio hidden as well; linked cue references survive.
+  await audio.click();await page.locator('[data-story-row=r0]').getByRole('button',{name:'Move row down',exact:true}).click();
+  await expect.poll(async()=>(await read()).rows.map(r=>r.id)).toEqual(['section','r0','r1','r2']);
+  expect((await read()).rows.find(r=>r.id==='r0').cards[0].cueRefs).toEqual(['c0','c1','c2']);
+  await first.getByLabel('Footage source').selectOption('interview');
+  await first.locator('[data-story-cue=c1]').click();
+  await expect(page.locator('.vhead')).toHaveText('Interview_20260317_CAM_02.mov');
+  // A project with audio and no explicit view preference opens its audio lane.
+  const withAudio=await read();delete withAudio.ui.storyAudio;
+  await page.evaluate(async doc=>{const db=await new Promise(resolve=>{const r=indexedDB.open('transcriber',1);r.onsuccess=()=>resolve(r.result);});await new Promise(resolve=>{const tx=db.transaction('projects','readwrite');tx.objectStore('projects').put(doc,'current');tx.oncomplete=resolve;});db.close();},withAudio);
+  await page.reload();await page.keyboard.press('F4');await expect(audio).toHaveAttribute('aria-pressed','true');
+  await page.setViewportSize({width:1000,height:1000});
+  const wrap=page.locator('.storywrap');expect(await wrap.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+  const videoBox=await page.locator('[data-story-row=r0] [data-column=video]').boundingBox(),audioBox=await page.locator('[data-story-row=r0] [data-column=audio]').boundingBox();expect(audioBox.y).toBeGreaterThan(videoBox.y);
+  await expect(page.locator('[data-column=audio] .dbody')).toHaveText('VO: A question worth asking.');
+  expect(errors).toEqual([]);
+  console.log('Document Story layout, responsive audio, persisted visibility, row numbering/reorder, shot Undo, source preview and source-linked content passed.');
+} finally {await browser.close();}

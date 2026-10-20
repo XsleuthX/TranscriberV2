@@ -35,7 +35,7 @@ test('Every source cue enters a bounded batch; Story uses issued source-linked c
 });
 test('Project JSON round-trips both subtitles, source links, Story, tracks, edits, settings and chunked PCM', () => {
   const original = project(); original.media.two.pcm = Int16Array.from({ length: 40001 }, (_, i) => i % 32767).buffer;
-  original.ui.dictionary={asr:[{from:'碎莲',to:'睡莲'}],tr:[]}; original.ui.priming=false;
+  original.ui.dictionary={asr:[{from:'碎莲',to:'睡莲'}],tr:[]}; original.ui.priming=false; original.ui.storyAudio=false;
   original.media.two.transcriptionSource={segments:[{start:2,end:4,text:'Original decode',logprob:null,noSpeech:.1}],unresolved:1};
   original.reviews = [{ reviewId: 'review', preset: 'subtitle_check', presetLabel: 'Subtitle Check', kind: 'cue', assetKey: 'one', scopeAsset: 'one', scopeContext: 'B', track: 'B', id: 'a_B', target: '["cue","one","B","a_B"]', signature: 'snapshot', reason: 'Review this wording', suggestion: '修正。' }];
   original.media.two.iconik = { assetId: 'asset-id', proxyId: 'proxy-id', audioUrl: '/api/session-audio' };
