@@ -43,6 +43,7 @@ jobs:
           npm run test:editing-browser
           npm run test:review-browser
           npm run test:story-review-browser
+          npm run test:story-range-browser
           npm run test:story-layout-browser
           npm run test:assembly-browser
       - name: Build deployment image

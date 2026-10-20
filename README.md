@@ -1,4 +1,4 @@
-# Transcriber v2.39 - Story document layout
+# Transcriber v2.40 - exact Story ranges
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
@@ -393,3 +393,9 @@ Transcript paragraph edits now synchronise Sub A, including imported/pinned cues
 Story now uses a wide script table inspired by a working production document: numbered rows, shot-type pills (including Studio), filenames, timecodes and larger cue text. Nested card frames and repeated filenames are removed. Card/row controls appear on hover or keyboard focus, and cue clicks continue to preview their linked source. Existing source bindings, text edits, drag/drop, timecode editing, notes and Undo remain available.
 
 The **Audio** button shows/hides the optional audio column. Audio appears automatically for a story containing audio items until you choose a visibility preference. Hiding Audio retains its content; the button shows the item count. The preference saves with the project and JSON export. At narrow document widths Audio stacks below Script. Section headings are excluded from row numbering.
+
+## v2.40 exact Story In/Out
+
+Timecode popovers open on click completion and dismiss on a new outside press, Escape or Cancel. Saved In/Out points take precedence over linked cues. Cue text can be updated independently using **Update linked cue text to this range**; authored manual/VO text is preserved by default. Saving a speech-gap range preserves the existing copy. **Use cue timing** explicitly returns a linked card to automatic cue boundaries.
+
+Manual ranges survive text edits, autosave, Project JSON and Story document export. Deleting/splitting linked text keeps explicit outer bounds while unpinned cards retain their existing cue-derived behavior. Multi-Timeline uses the exact duration, including short cuts, and clips subtitle overlays to those bounds. Frame input uses the app's current fixed 25fps timecode convention; invalid minute/second/frame fields are rejected. Popovers and drags account for UI zoom.

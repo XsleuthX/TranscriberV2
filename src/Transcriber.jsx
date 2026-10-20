@@ -1,3 +1,4 @@
+import { storyRange, manualStoryRange, saveStoryRange, storyGroupRange, parseStoryTimecode } from './story-range.js';
 import './story-document.css';
 import { editTranscript } from './transcript-edit.js';
 import BatchTranscribe from './BatchTranscribe.jsx';
@@ -305,12 +306,7 @@ function usedCueMap(rows, assetKey) {
     (c.assetKey === assetKey ? c.cueRefs || [] : []).forEach((id) => m.set(canonRef(id), ri + 1))));
   return m;
 }
-const cardRange = (card, cues, words) => {
-  const refs = (card.cueRefs || []).map((id) => findRef(cues, id)).filter(Boolean);
-  if (!refs.length) return { start: card.sin ?? 0, end: card.sout ?? 0 };
-  const t = refs.map((c) => cueTime(c, words));
-  return { start: Math.min(...t.map((x) => x.start)), end: Math.max(...t.map((x) => x.end)) };
-};
+const cardRange = (card, cues, words) => storyRange(card,cues,c=>cueTime(c,words));
 /* ── Story ⇄ subtitle-cue live binding (ported from the original build) ── */
 
 /**
@@ -596,6 +592,7 @@ const groupOf = (doc, id) => {
 function subtitleClipsFromCard(card, cues, words, projectIn, cardStart, trackId, seed) {
   const refs = (card.cueRefs || []).map((id) => findRef(cues, id)).filter(Boolean);
   const off = projectIn - cardStart;
+  const bounds=cardRange(card,cues,words);
   const mk = (text, s, e, i) => {
     if (!String(text || "").trim() || !(e > s)) return null;
     return {
@@ -610,7 +607,7 @@ function subtitleClipsFromCard(card, cues, words, projectIn, cardStart, trackId,
   if (refs.length)
     return refs.map((cu, i) => {
       const t = cueTime(cu, words);
-      return mk(cueText(cu, words), t.start, t.end, i);
+      return mk(cueText(cu, words), Math.max(t.start,bounds.start), Math.min(t.end,bounds.end), i);
     }).filter(Boolean);
   const one = mk(card.body || card.title, card.sin ?? 0, card.sout ?? 0, 0);
   return one ? [one] : [];
@@ -1227,7 +1224,7 @@ export default function Transcriber() {
   }, [media, editTrack]);
   const wordsOf = useCallback((k) => media[k]?.words || [], [media]);
   const assets = useMemo(() =>
-    Object.entries(media).map(([key, v]) => ({ key, type: v.type, name: v.name })), [media]);
+    Object.entries(media).map(([key, v]) => ({ key, type: v.type, name: v.name, startTc:v.startTc })), [media]);
   const programDoc = useMemo(() => resolveTimeline(mtl, rows), [mtl, rows]);
   const [mtlSel, setMtlSel] = useState(() => new Set());
   const [mtlMarks, setMtlMarks] = useState({ in: null, out: null });
@@ -1567,8 +1564,9 @@ export default function Transcriber() {
       if (e.target.closest?.(".tcpop") || e.target.closest?.(".tcfloat") || e.target.closest?.(".dtc")) return;
       setTcPop(null);
     };
-    window.addEventListener("click", h);
-    return () => window.removeEventListener("click", h);
+    const key=e=>{if(e.key==='Escape')setTcPop(null);};
+    window.addEventListener('pointerdown',h,true);window.addEventListener('keydown',key);
+    return ()=>{window.removeEventListener('pointerdown',h,true);window.removeEventListener('keydown',key);};
   }, [tcPop]);
 
   useEffect(() => {
@@ -2082,8 +2080,8 @@ export default function Transcriber() {
         ...card,
         id: first ? card.id : `card_${Math.random().toString(36).slice(2, 9)}`,
         cueRefs: [...g], sourceCueRefs: [...g],
-        sin: cardRange({ cueRefs: g }, ownCues, ownWords).start,
-        sout: cardRange({ cueRefs: g }, ownCues, ownWords).end,
+        sin: storyGroupRange(card,g,clean.indexOf(g),clean.length,ownCues,c=>cueTime(c,ownWords)).start,
+        sout: storyGroupRange(card,g,clean.indexOf(g),clean.length,ownCues,c=>cueTime(c,ownWords)).end,
         body: "", bodyManual: false, notes: first ? card.notes : "",
         title: first ? card.title
           : g.map((id) => cueText(findRef(ownCues, id) || {}, ownWords)).join(" ")
@@ -2150,7 +2148,7 @@ export default function Transcriber() {
     setCuesOn2(card.assetKey, (cs) => cs.map((c) => (texts[canonRef(c.id)] != null && texts[canonRef(c.id)] !== cueText(c, ownWords)
       ? { ...c, textOverride: texts[canonRef(c.id)] === cueBaseText(c, ownWords) ? null : texts[canonRef(c.id)] } : c)));
     const nextRange = cardRange({ cueRefs: kept }, disp, ownWords);
-    patchCard(rowId, card.id, { cueRefs: kept, sourceCueRefs: kept, sin: nextRange.start, sout: nextRange.end, body: "", bodyManual: false });
+    patchCard(rowId, card.id, { cueRefs: kept, sourceCueRefs: kept, ...(manualStoryRange(card)?{}:{sin:nextRange.start,sout:nextRange.end}), body: "", bodyManual: false });
     if (kept.length !== baseRefs.length) {
       const n = baseRefs.length - kept.length;
       setToast(`${n} cue${n === 1 ? "" : "s"} dropped — timecode updated.`);
@@ -2206,7 +2204,7 @@ export default function Transcriber() {
       visuals.forEach((c) => {
         const cc = cuesOf(c.assetKey), cw = wordsOf(c.assetKey);
         const { start, end } = cardRange(c, cc, cw);
-        const d = Math.max(end - start, 0.5);
+        const d = end>start?end-start:0.5;
         const gid = `g_${out.length}`;
         const base = { assetKey: c.assetKey, groupId: gid, storyCardId: c.id, sin: start, sout: end, pin: cursor, pout: cursor + d };
         if (c.kind === "caption") {
@@ -2228,8 +2226,8 @@ export default function Transcriber() {
       const rowEnd = cursor > rowStart ? cursor : rowStart + 3;
       audio.forEach((c, i) => out.push({
         id: `m${out.length}`, trackId: ["A3", "A4", "A2"][i % 3], kind: "audio",
-        title: c.title, assetKey: c.assetKey, storyCardId: c.id, sin: c.sin || 0, sout: (c.sin || 0) + rowEnd - rowStart,
-        pin: rowStart, pout: rowEnd, color: KIND_COLOR.audio,
+        title: c.title, assetKey: c.assetKey, storyCardId: c.id, sin: c.sin || 0, sout: manualStoryRange(c)?c.sout:(c.sin || 0) + rowEnd - rowStart,
+        pin: rowStart, pout: manualStoryRange(c)?rowStart+c.sout-c.sin:rowEnd, color: KIND_COLOR.audio,
       }));
       if (cursor === rowStart && audio.length) cursor = rowEnd;
     });
@@ -4245,7 +4243,7 @@ export default function Transcriber() {
                 <div className={'tbl'+(storyAudioVisible?' with-audio':'')} aria-label="Story assembly document" data-audio-visible={storyAudioVisible}>
                   <div className="thead"><div>#</div><div>Script</div>{storyAudioVisible&&<div className="audio-heading">Audio</div>}</div>
                   {rows.map((row, ri) => (
-                    <StoryRow key={row.id} row={row} ri={ri} number={rows.slice(0,ri+1).filter(r=>!r.isSection).length} showAudio={storyAudioVisible} cues={cues} words={words}
+                    <StoryRow key={row.id} row={row} ri={ri} number={rows.slice(0,ri+1).filter(r=>!r.isSection).length} showAudio={storyAudioVisible} sourceTimecode={useSrcTc} cues={cues} words={words}
                       activeCard={activeCard} over={overRow === row.id}
                       onDragStart={() => setDragRow(row.id)}
                       onDragOver={() => setOverRow(row.id)}
@@ -4290,8 +4288,11 @@ export default function Transcriber() {
                       }}
                       assets={assets} activeAsset={activeAsset}
                       cuesOf={storyCuesOf} wordsOf={wordsOf}
-                      onOpenTc={(el, card, live, range) =>
-                        setTcPop({ anchor: el, rowId: row.id, card: { ...card, sin: range.start, sout: range.end }, live })}
+                      onOpenTc={(el, card, live, range) => {
+                        setActiveCard({rowId:row.id,cardId:card.id});
+                        if(card.assetKey)storySeek(range.start,card.assetKey);
+                        setTcPop({ anchor: el, rowId: row.id, card: { ...card, sin: range.start, sout: range.end }, live });
+                      }}
                       onDeleteCard={(cardId) => deleteCard(row.id, cardId)}
                       onSeek={storySeek}
                       onAdd={(col) => {if(col==='audio')setStoryAudio(true);setModal({ kind: "add", rowId: row.id, col });}}
@@ -5354,7 +5355,7 @@ export default function Transcriber() {
                   <div key={c.id} className="crow" style={{ gridTemplateColumns: "34px 130px 1fr 60px" }}
                     onClick={() => {
                       const at = mtl.clips.reduce((a, x) => Math.max(a, x.pout), 0);
-                      const d = Math.max(t.end - t.start, 0.5);
+                      const d = t.end>t.start?t.end-t.start:0.5;
                       const gid = `g_${Date.now()}`;
                       mtlCommit((doc) => ({ ...doc, clips: [...doc.clips,
                         { id: `v_${Date.now()}`, trackId: "V1", kind: "video", title: c.title, groupId: gid,
@@ -5380,35 +5381,23 @@ export default function Transcriber() {
       )}
 
       {tcPop && (
-        <TimecodePopover
-          anchor={tcPop.anchor} card={tcPop.card} live={tcPop.live}
+        <TimecodePopover key={tcPop.card.id}
+          anchor={tcPop.anchor} card={tcPop.card} live={tcPop.live} offset={useSrcTc?(parseTc(media[tcPop.card.assetKey]?.startTc||"")??0):0}
           onPlay={(r) => playRanges([r], `Playing ${Tapp(r.in)} → ${Tapp(r.out)}`)}
-          cues={tcPop.card?.assetKey ? cuesOf(tcPop.card.assetKey, editTrack) : (tcPop.card?.assetKey === null ? [] : cues)}
+          cues={tcPop.card?.assetKey ? storyCuesOf(tcPop.card.assetKey) : []}
           words={tcPop.card?.assetKey ? wordsOf(tcPop.card.assetKey) : (tcPop.card?.assetKey === null ? [] : words)}
           onSeek={seek}
           onClose={() => setTcPop(null)}
-          onApply={({ start, end, refs }) => {
-            if (tcPop.live) {
-              patchCard(tcPop.rowId, tcPop.card.id, {
-                kind: "cue", cueRefs: refs, sourceCueRefs: refs, body: "", bodyManual: false,
-              });
-              setToast(`Re-linked to ${refs.length} cue${refs.length === 1 ? "" : "s"}.`);
-            } else if (refs.length) {
-              // A manual card that now covers real cues becomes a live card and
-              // adopts their text, rather than staying an empty box.
-              patchCard(tcPop.rowId, tcPop.card.id, {
-                kind: tcPop.card.kind === "caption" ? "caption" : "cue",
-                cueRefs: refs, sourceCueRefs: refs, sin: start, sout: end,
-                body: "", bodyManual: false,
-                title: tcPop.card.kind === "caption" ? tcPop.card.title
-                  : refs.map((id) => cueText(findRef(cues, id), words)).join(" ")
-                      .split(/\s+/).slice(0, 5).join(" ") + "…",
-              });
-              setToast(`Linked to ${refs.length} cue${refs.length === 1 ? "" : "s"} — text pulled in.`);
-            } else {
-              patchCard(tcPop.rowId, tcPop.card.id, { sin: start, sout: end });
-              setToast("Timecode updated. No cues in that range.");
-            }
+          onCueTiming={()=>{
+            const card=tcPop.card,cc=storyCuesOf(card.assetKey),cw=wordsOf(card.assetKey);
+            const range=cardRange({...card,rangeMode:'cues'},cc,cw);
+            patchCard(tcPop.rowId,card.id,{rangeMode:'cues',sin:range.start,sout:range.end});setTcPop(null);
+          }}
+          onApply={values=>{
+            const card=tcPop.card,cc=storyCuesOf(card.assetKey),cw=wordsOf(card.assetKey);
+            const body=card.cueRefs?.length&&!card.bodyManual?bodyFromCues(card.cueRefs,cc,cw):card.body;
+            patchCard(tcPop.rowId,card.id,saveStoryRange(card,values,body));
+            setToast('Exact In / Out saved. Cue text stays source-linked where available.');
             setTcPop(null);
           }} />
       )}
@@ -7076,7 +7065,7 @@ function ClipPreview({ clip, videoUrl, cues, words, onClose }) {
 /* ═══ story doc table ═══════════════════════════════════════════════════ */
 
 function StoryRow({
-  row, ri, number=ri+1, showAudio=true, cues, words, activeCard, over, onDragStart, onDragOver, onDrop,
+  row, ri, number=ri+1, showAudio=true, sourceTimecode=false, cues, words, activeCard, over, onDragStart, onDragOver, onDrop,
   onSelectCard, onPatchCard, onCommitBody, onCommitCue, onDropCue, onDeleteCard, onMoveCard,
   onCueCtx, onNudge,
   onSeek, onAdd, onPatchRow, onMoveRow, onDeleteRow, assets, activeAsset, onOpenTc,
@@ -7133,7 +7122,7 @@ function StoryRow({
               onNudge={(cueId, edge, d) => onNudge?.(c, cueId, edge, d)}
               onDelete={() => onDeleteCard(c.id)}
               onMove={(d) => onMoveCard(c.id, d)}
-              assets={assets} activeAsset={activeAsset} onOpenTc={onOpenTc}
+              assets={assets} activeAsset={activeAsset} onOpenTc={onOpenTc} sourceTimecode={sourceTimecode}
               cuesOf={cuesOf} wordsOf={wordsOf}
               onDragStart={() => onCardDragStart(c, col)}
               onSeek={t => onSeek(t, c.assetKey)} />
@@ -7151,7 +7140,7 @@ function StoryRow({
 function DocCard({
   c, cues, words, on, onSelect, onPatch, onCommitBody, onCommitCue, onDropCue, onDelete, onSeek, onMove,
   onCueCtx, onNudge,
-  assets, activeAsset, onOpenTc, onDragStart, cuesOf, wordsOf,
+  assets, activeAsset, onOpenTc, onDragStart, cuesOf, wordsOf, sourceTimecode=false,
 }) {
   const [notes, setNotes] = useState(!!c.notes);
 
@@ -7165,12 +7154,11 @@ function DocCard({
   const linked = (c.cueRefs || []).map((x) => findRef(ownCues, x)).filter(Boolean);
   const live = (c.kind === "cue" || c.kind === "clip") && linked.length > 0;
   const asset = assets.find((a) => a.key === c.assetKey);
+  const cardOffset=sourceTimecode?(parseTc(asset?.startTc||"")??0):0;
+  const formatCardTime=t=>tc(t+cardOffset);
   const missing = !!c.assetKey && !asset;
   const body = live ? bodyFromCues(c.cueRefs, ownCues, ownWords) : c.body;
-  const range = live
-    ? { start: Math.min(...linked.map((x) => cueTime(x, ownWords).start)),
-        end: Math.max(...linked.map((x) => cueTime(x, ownWords).end)) }
-    : { start: c.sin ?? 0, end: c.sout ?? 0 };
+  const range = cardRange(c,ownCues,ownWords);
 
   return (
     <div className={`dcard${on ? " on" : ""}`} data-card-id={c.id} data-shot={c.label} onClick={onSelect}>
@@ -7223,9 +7211,8 @@ function DocCard({
       {/* One timecode for the whole block, live-derived when linked. */}
       <div className="dmeta">
         <button className="dtc" data-card-tc={c.id} title="Click to edit In / Out and preview the cues in range"
-          onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onOpenTc(e.currentTarget, c, live, range); }}
-          onClick={(e) => e.stopPropagation()}>
-          {tc(range.start)} → {tc(range.end)}
+          onClick={(e) => { e.stopPropagation(); onOpenTc(e.currentTarget,c,live,range); }}>
+          {formatCardTime(range.start)} → {formatCardTime(range.end)}
         </button>
         {live && (
           <button className="dmini" title="Edit cues individually"
@@ -7250,7 +7237,7 @@ function DocCard({
                 }}>
                 <button className="mtc" title="Seek here"
                   onClick={(e) => { e.stopPropagation(); onSeek(t.start); }}>
-                  {tc(t.start)} → {tc(t.end)}
+                  {formatCardTime(t.start)} → {formatCardTime(t.end)}
                 </button>
                 <div className="mtxt" contentEditable suppressContentEditableWarning
                   onClick={(e) => e.stopPropagation()}
@@ -7290,7 +7277,7 @@ function DocCard({
 
       <div className={"dfoot"+(missing?" has-warning":"")}>
         <span>
-          {!c.assetKey ? "Unlinked"
+          {manualStoryRange(c)?"Exact In / Out · ":""}{!c.assetKey ? "Unlinked"
             : missing ? "Missing source — re-import or re-point"
             : live ? `${linked.length} linked cue${linked.length===1?"":"s"}`
             : c.kind === "caption" ? "Caption"
@@ -7670,14 +7657,15 @@ function TrackHead({ t, height, soloed, onPatch }) {
 
 /**
  * Anchored timecode editor plus its paired floating cue-range preview.
- * For a manual card Apply sets In/Out. For a live card Apply RE-LINKS: the
- * card adopts whatever cues now fall inside the range. The floater is
+ * Saving pins exact In/Out. Updating linked cue text is an explicit option;
+ * cue boundaries never replace a saved manual range. The floater is
  * draggable and updates as you type, so you can hunt for the cues you want
  * before committing — and clicks inside it must not dismiss the popover.
  */
-function TimecodePopover({ anchor, card, cues, words, live, onSeek, onApply, onClose, onPlay }) {
-  const T = useTcd();
-  const P = useTcParse();
+function TimecodePopover({ anchor, card, cues, words, live, onSeek, onApply, onClose, onPlay, onCueTiming, offset=0 }) {
+  const T=t=>tc(t+offset);
+  const P=text=>parseStoryTimecode(text,offset,FPS);
+  const [relink,setRelink]=useState(live);
   const [inTc, setInTc] = useState(T(card.sin ?? 0));
   const [outTc, setOutTc] = useState(T(card.sout ?? 0));
   const [pos, setPos] = useState(null);
@@ -7686,30 +7674,31 @@ function TimecodePopover({ anchor, card, cues, words, live, onSeek, onApply, onC
 
   useEffect(() => {
     if (!anchor) return;
-    const r = anchor.getBoundingClientRect();
-    const left = Math.min(window.innerWidth - 290, Math.max(10, r.left));
-    let top = r.bottom + 8;
-    if (top + 210 > window.innerHeight - 10) top = Math.max(10, r.top - 218);
+    const r=anchor.getBoundingClientRect(),z=elScale(anchor.closest('.tx'));
+    const width=window.innerWidth/z,height=window.innerHeight/z;
+    const left=Math.min(width-310,Math.max(10,r.left/z));
+    let top=r.bottom/z+8;
+    if(top+290>height-10)top=Math.max(10,r.top/z-298);
     setPop({ left, top });
-    setPos({ left: Math.min(window.innerWidth - 360, left + 300), top });
+    setPos({left:Math.max(6,Math.min(width-360,left+320)),top});
   }, [anchor]);
 
   const s = P(inTc), e = P(outTc);
-  const valid = s != null && e != null && e > s;
+  const valid = s != null && e != null && s>=0 && e > s;
   const hits = valid ? cueRefsForRange(s, e, cues, words).map((id) => cues.find((c) => c.id === id)).filter(Boolean) : [];
 
   const step = (which, f) => {
     const cur = P(which === "in" ? inTc : outTc);
     if (cur == null) return;
-    const v = tc(Math.max(0, cur + f * frame));
+    const v = T(Math.max(0, cur + f * frame));
     if (which === "in") setInTc(v); else setOutTc(v);
   };
 
   const dragStart = (ev) => {
     dragRef.current = { x: ev.clientX, y: ev.clientY, ...pos };
     const move = (m) => setPos({
-      left: Math.max(6, dragRef.current.left + m.clientX - dragRef.current.x),
-      top: Math.max(6, dragRef.current.top + m.clientY - dragRef.current.y),
+      left: Math.max(6,dragRef.current.left+(m.clientX-dragRef.current.x)/elScale(anchor?.closest('.tx'))),
+      top: Math.max(6,dragRef.current.top+(m.clientY-dragRef.current.y)/elScale(anchor?.closest('.tx'))),
     });
     const up = () => {
       dragRef.current = null;
@@ -7722,40 +7711,39 @@ function TimecodePopover({ anchor, card, cues, words, live, onSeek, onApply, onC
 
   return (
     <>
-      <div className="tcpop" style={{ left: pop.left, top: pop.top }} onClick={(ev) => ev.stopPropagation()}>
-        <div className="tcpop-t">{live ? "Re-link Story Card range" : "Edit Story Card timecode"}</div>
+      <div className="tcpop" role="dialog" aria-label="Story timecode" style={{ left: pop.left, top: pop.top }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="tcpop-t">Edit Story Card timecode</div>
         <label><span>In</span>
-          <input value={inTc} onChange={(ev) => setInTc(ev.target.value)} />
+          <input aria-label="Story In timecode" value={inTc} onChange={(ev) => setInTc(ev.target.value)} />
           <button onClick={() => step("in", -1)}>−</button><button onClick={() => step("in", 1)}>+</button>
         </label>
         <label><span>Out</span>
-          <input value={outTc} onChange={(ev) => setOutTc(ev.target.value)} />
+          <input aria-label="Story Out timecode" value={outTc} onChange={(ev) => setOutTc(ev.target.value)} />
           <button onClick={() => step("out", -1)}>−</button><button onClick={() => step("out", 1)}>+</button>
         </label>
         <div className="tcpop-n">
-          {live
-            ? "Apply re-links this card to the cues inside the range."
-            : hits.length
-              ? "Apply links this card to these cues and pulls their text in."
-              : "No cues here — Apply just sets this card's In / Out."}
+          Save keeps your exact In / Out at {FPS} fps. Linked cues never snap these points.
+          <label className="range-link"><input type="checkbox" checked={relink} onChange={ev=>setRelink(ev.target.checked)}/>Update linked cue text to this range</label>
+          {!valid&&<p role="alert">Enter HH:MM:SS:FF (frames 00–24), with a nonnegative In and a later Out.</p>}
         </div>
         <div className="tcpop-a">
-          <button disabled={s == null || e == null || e <= s}
+          <button disabled={!valid}
             title="Play this range in the viewer"
             onClick={() => onPlay?.({ in: s, out: e })}>Play</button>
+          {manualStoryRange(card)&&card.cueRefs?.length>0&&<button onClick={onCueTiming}>Use cue timing</button>}
           <button onClick={onClose}>Cancel</button>
           {/* Always saveable. Refusing to save because the range happens to
               contain no cues left people stuck with a timecode they could edit
               but not keep. */}
           <button className="pri" disabled={!valid}
-            onClick={() => onApply({ start: s, end: e, refs: hits.map((c) => c.id) })}>
+            onClick={() => onApply({ start: s, end: e, relink, refs: hits.map((c) => c.id) })}>
             Save{hits.length ? ` · ${hits.length} cue${hits.length === 1 ? "" : "s"}` : ""}
           </button>
         </div>
       </div>
 
       {pos && (
-        <div className="tcfloat" style={{ left: pos.left, top: pos.top }} onClick={(ev) => ev.stopPropagation()}>
+        <div className="tcfloat" role="dialog" aria-label="Cues in story range" style={{ left: pos.left, top: pos.top }} onClick={(ev) => ev.stopPropagation()}>
           <div className="tcfloat-h" onMouseDown={dragStart}>
             <GripVertical size={11} />
             <span>Cues in range</span>
@@ -7768,7 +7756,7 @@ function TimecodePopover({ anchor, card, cues, words, live, onSeek, onApply, onC
               const t = cueTime(c, words);
               return (
                 <div className="tcfloat-r" key={c.id} onClick={() => onSeek(t.start)}>
-                  <em>{tc(t.start)} → {tc(t.end)}</em>
+                  <em>{T(t.start)} → {T(t.end)}</em>
                   <p>{cueText(c, words)}</p>
                 </div>
               );

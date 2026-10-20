@@ -90,6 +90,8 @@ export function importProjectJSON(text) {
       if (card.body != null && typeof card.body !== 'string') fail('Invalid Story text.');
       for (const field of ['title', 'label', 'notes', 'speaker']) if (card[field] != null && typeof card[field] !== 'string') fail('Invalid Story label.');
       if (!['cue', 'clip', 'audio', 'caption', 'generic', 'music', 'sfx', 'vo', 'nat', 'ambience'].includes(card.kind) || !['video', 'audio'].includes(card.col)) fail('Invalid Story card type.');
+      if(card.rangeMode!=null&&!['manual','cues'].includes(card.rangeMode))fail('Invalid Story range mode.');
+      if(card.rangeMode==='manual'&&(!Number.isFinite(card.sin)||!Number.isFinite(card.sout)||card.sin<0||card.sout<=card.sin))fail('Invalid manual Story range.');
       for (const field of ['sin', 'sout']) if (card[field] != null && (!Number.isFinite(card[field]) || card[field] < 0)) fail('Invalid Story timing.');
     }
   }

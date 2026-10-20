@@ -1,4 +1,7 @@
 /* Story is a writing document: table rules carry structure, not nested cards. */
+.tcpop .range-link{margin-top:8px;align-items:flex-start;line-height:1.45}
+.tcpop .range-link input{flex:none;width:auto;padding:0;margin:2px 3px 0 0}
+.tcpop .tcpop-a{flex-wrap:wrap}
 .storywrap{container:storypage / inline-size;background:#f0f1f2}
 .storywrap .storydoc{max-width:1120px;padding:28px 28px 44px;box-sizing:border-box}
 .storywrap .story-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px}
