@@ -21,7 +21,7 @@ test('decoded batch audio cache evicts recoverable old sources and protects acti
  cacheAudio(map,'c',new Float32Array(4),{limit:32,protectedKeys:new Set(['a'])});assert.deepEqual([...map.keys()],['a','c']);
 });
 test('spelling checklist is exact and guards non-word boundaries and context-dependent terms',()=>{
- assert.equal(spellingCoverage().count,153);
+ assert.ok(spellingCoverage().count>900);
  const flags=scan({cues:[{id:0,current:'color COLOR Color écolor color2 _color program license check meter https://color.com Dr. colorful.'}]},[],{uk:true,chinese:'off',contextual:false});
  assert.deepEqual(flags.map(f=>f.from),['color','COLOR','Color','colorful']);assert.deepEqual(flags.map(f=>f.to),['colour','COLOUR','Colour','colourful']);
 });

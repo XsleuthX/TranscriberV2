@@ -1,3 +1,4 @@
+import { familySpellings, iseFamilies } from './uk-spelling.js';
 // Local review engine adapted from the user-supplied Subtitle Vet UI.
   const pairs = `color:colour colors:colours colored:coloured coloring:colouring colorful:colourful colorless:colourless
 favorite:favourite favorites:favourites favor:favour favors:favours favored:favoured favoring:favouring favorable:favourable unfavorable:unfavourable
@@ -31,8 +32,8 @@ license:licence licenses:licences program:programme programs:programmes
 catalog:catalogue catalogs:catalogues dialog:dialogue dialogs:dialogues
 check:cheque checks:cheques practice:practice`.split(/\s+/).map(x => x.split(':')).filter(([a,b]) => a !== b);
   const contextual = new Set(['meter','meters','program','programs','license','licenses','check','checks']);
-  const dictionary = new Map(pairs);
-  export const spellingCoverage=()=>({count:dictionary.size,direction:'US → UK (−ise house style)',contextual:[...contextual],entries:[...dictionary].map(([from,to])=>({from,to}))});
+  const dictionary = new Map([...pairs,...familySpellings()]);
+  export const spellingCoverage=()=>({count:dictionary.size,direction:'US → UK (−ise house style)',contextual:[...contextual],families:iseFamilies.length,entries:[...dictionary].map(([from,to])=>({from,to}))});
   const han = /\p{Script=Han}/u;
   const punct = /\p{P}/gu;
   const tags = /(<[^>]*>|\{\\[^}]*\}|&(?:#\d+|#x[0-9a-f]+|[a-z]+);)/gi;

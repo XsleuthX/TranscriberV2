@@ -1,4 +1,4 @@
-# Transcriber v2.37 - audit checklist and batch workflows
+# Transcriber v2.38 - Transcript sync and broader UK spelling
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
@@ -382,3 +382,8 @@ See [AUDIT-CHECKLIST.md](AUDIT-CHECKLIST.md) for all 153 spelling mappings, prot
 Multi-file imports now prepare audio sequentially and show per-source status. In Transcribe, expand Batch transcribe media, select eligible sources and Start batch transcription. Existing transcripts require explicit replacement opt-in. The queue continues after per-file errors and supports cancellation; keep the tab open. API calls are billed normally.
 
 Story Suggestion creates editable, source-linked sample cards, avoids overlapping quote repetition, bounds shortlist reduction and preserves concurrent Story edits. See [v2.37 release notes](CHANGELOG-v2.37.md).
+
+
+## v2.38 editing and spelling
+
+Transcript paragraph edits now synchronise Sub A, including imported/pinned cues, regardless of the last selected subtitle track. Changes retain source timing, cue identity, B translations and linked Story/Timeline references in one Undo action. Separately rewritten cues that cannot be mapped safely are retained with a review notice. Local spelling now covers 1161 explicit mappings from 165 allowed −ise verb families and other variants; no blanket z-to-s replacement. Vet settings includes Team Rules examples. See [audit and usage details](AUDIT-CHECKLIST.md).

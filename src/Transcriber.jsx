@@ -1,3 +1,4 @@
+import { editTranscript } from './transcript-edit.js';
 import BatchTranscribe from './BatchTranscribe.jsx';
 import {serialScheduler,transcribeQueue,cacheAudio} from './media-queue.js';
 import { aiRequest } from './ai-request.js';
@@ -259,52 +260,6 @@ const srtToWords = (text) => srtToProject(text).words;
  * words get time interpolated from their neighbours. This is what makes
  * editing practical without throwing away word timing.
  */
-function realignLine(oldWords, text, bounds) {
-  const toks = text.trim().split(/\s+/).filter(Boolean);
-  if (!toks.length) return [];
-  const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-  const a = oldWords.map((w) => norm(w.t));
-  const b = toks.map(norm);
-  const n = a.length, m = b.length;
-
-  // LCS table, walked to produce a token→word map.
-  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--)
-      dp[i][j] = a[i] && a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-
-  const map = new Array(m).fill(-1);
-  let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (a[i] && a[i] === b[j]) { map[j] = i; i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
-    else j++;
-  }
-
-  const sp = oldWords[0]?.sp ?? "S1";
-  const out = toks.map((t, k) => {
-    const src = map[k] >= 0 ? oldWords[map[k]] : null;
-    return src
-      ? { t, s: src.s, e: src.e, sp: src.sp, edited: src.edited || src.t !== t }
-      : { t, s: null, e: null, sp, edited: true };
-  });
-
-  // Interpolate every run of new words between two anchors.
-  let k = 0;
-  while (k < m) {
-    if (out[k].s != null) { k++; continue; }
-    let z = k;
-    while (z < m && out[z].s == null) z++;
-    const from = k > 0 ? out[k - 1].e : bounds.start;
-    const to = z < m ? out[z].s : bounds.end;
-    const span = Math.max(to - from, (z - k) * 0.08);
-    const step = span / (z - k);
-    for (let x = k; x < z; x++) { out[x].s = from + step * (x - k); out[x].e = from + step * (x - k + 1); }
-    k = z;
-  }
-  return out;
-}
-
 /** After the word stream changes shape, re-anchor cues by their old times. */
 function remapCues(cues, oldWords, newWords) {
   const idxAt = (t, mode) => {
@@ -1993,16 +1948,15 @@ export default function Transcriber() {
 
   const commitLine = (turnIdx, text) => {
     const turn = turns[turnIdx];
-    if (!turn) return;
-    const oldSlice = turn.words;
-    const first = oldSlice[0].i, last = oldSlice[oldSlice.length - 1].i;
-    const bounds = { start: oldSlice[0].s, end: oldSlice[oldSlice.length - 1].e };
-    const rebuilt = realignLine(oldSlice, text, bounds);
-    if (!rebuilt.length) return;
-    const before = words.slice(0, first), after = words.slice(last + 1);
-    const next = [...before, ...rebuilt, ...after].map((w, i) => ({ ...w, i }));
-    setCues((cs) => remapCues(cs, words, next));
-    setWords(next);
+    if (!turn?.words.length) return;
+    const first=turn.words[0].i,last=turn.words.at(-1).i;
+    let conflicts=0;
+    patchAsset(activeAsset,asset=>{
+      // Always writes Sub A, even when Sub B was selected in Subtitle mode.
+      const result=editTranscript(asset,first,last,text,cueText,cueTime);
+      conflicts=result.conflicts;return result.asset;
+    });
+    if(conflicts)setToast('Transcript saved. '+conflicts+' subtitle edits need review because Sub A was edited separately.');
   };
 
   /* ── clips ─────────────────────────────────────────────────────────────── */
@@ -6579,7 +6533,7 @@ function TranscriptLine({ turn, time, sel, onSeek, onSelect, onCommit, onFocus, 
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const ref = useRef(null);
-  const text = turn.words.map((w) => w.t).join(" ");
+  const text = joinWords(turn.words);
 
   useEffect(() => {
     const up = () => setDragging(false);
@@ -6587,18 +6541,19 @@ function TranscriptLine({ turn, time, sel, onSeek, onSelect, onCommit, onFocus, 
     return () => window.removeEventListener("mouseup", up);
   }, []);
 
+  useEffect(() => { if(editing&&ref.current){ref.current.textContent=text;ref.current.focus();} }, [editing]);
   if (editing)
     return (
-      <div ref={ref} className="line editing" contentEditable suppressContentEditableWarning autoFocus
+      <div key="edit" ref={ref} className="line editing" contentEditable suppressContentEditableWarning aria-label="Edit transcript paragraph"
         onBlur={(e) => { setEditing(false); onBlurLine?.(); onCommit(e.currentTarget.innerText); }}
         onKeyDown={(e) => {
           if (e.key === "Escape") { e.currentTarget.innerText = text; e.currentTarget.blur(); }
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); }
-        }}>{text}</div>
+        }} />
     );
 
   return (
-    <div className="line" onDoubleClick={() => { onFocus?.(); setEditing(true); }}
+    <div key="read" className="line" onDoubleClick={() => { onFocus?.(); setEditing(true); }}
       title="Click a word to seek · double-click the line to rewrite it">
       <ReviewHint kind="transcript" wordStart={turn.words[0]?.i} wordEnd={turn.words.at(-1)?.i} startTime={turn.words[0]?.s} endTime={turn.words.at(-1)?.e} />
       {turn.words.map((w) => {

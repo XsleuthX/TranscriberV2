@@ -1,5 +1,6 @@
 import {chromium,expect} from '@playwright/test';
 import fs from 'node:fs/promises';
+import {spellingCoverage} from '../src/vet-core.js';
 const browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL==='chromium'?{}:{channel:process.env.BROWSER_CHANNEL||'msedge'})});
 try {
  const page=await browser.newPage({viewport:{width:1600,height:1000}}),errors=[],api=[];
@@ -62,6 +63,7 @@ try {
  await expect(bar.getByLabel('Issues only')).not.toBeChecked();
  await bar.getByRole('button',{name:'Vet settings',exact:true}).click();settings=page.getByRole('dialog',{name:'Subtitle vet settings'});
  await settings.getByRole('button',{name:'Team rules',exact:true}).click();
+ await expect(settings.getByText('How to enter Team Rules · examples',{exact:true})).toBeVisible();
  await settings.getByLabel('Team comments',{exact:true}).fill('colour → brand shade\nPlease make this clearer');
  await settings.getByRole('button',{name:'Create rules',exact:true}).click();
  await expect(settings).toContainText('2 remaining matches in 2 cues');await expect(settings).toContainText('Please make this clearer');
@@ -113,7 +115,7 @@ try {
  await expect(aiFlags.getByRole('button',{name:'Apply suggestion',exact:true})).toBeDisabled();
  const beforeFormat=(await asset()).cues;
  await bar.getByRole('button',{name:'Vet settings',exact:true}).click();settings=page.getByRole('dialog',{name:'Subtitle vet settings'});
- await expect(settings).toContainText('153 exact dictionary entries');
+ await expect(settings).toContainText(spellingCoverage().count+' exact dictionary entries');
  await settings.getByLabel('Enable format audit').check();await settings.getByLabel('Audit minimum duration').fill('4');
  await page.screenshot({path:process.env.AUDIT_SCREENSHOT||'.test-temp/vet-checklist.png'});
  await settings.getByRole('button',{name:'Close vet dialog',exact:true}).click();await bar.getByLabel('Vet category').selectOption('format');

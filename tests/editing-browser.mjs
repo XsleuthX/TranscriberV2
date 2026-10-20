@@ -98,6 +98,25 @@ try {
   await page.getByRole('button', { name: 'Replace', exact: true }).click();
   await expect.poll(async () => (await project()).media.wide.cues.map(textOf)).toEqual(['better word,', 'bad word.']);
   await expect.poll(async () => (await project()).media.wide.words.map(w => w.t)).toEqual(['better', 'word,', 'bad', 'word.']);
+  // Editing prose always synchronises Sub A, including imported pinned cues,
+  // even when Sub B was last selected. One Undo restores both representations.
+  await track.selectOption('B');
+  await page.locator('.line').first().dblclick();
+  const paragraph=page.getByLabel('Edit transcript paragraph');
+  await expect(paragraph).toBeFocused();
+  await paragraph.fill('Best words, no weaponizing.');await paragraph.press('Enter');
+  await expect.poll(async()=>(await project()).media.wide.cues.map(textOf)).toEqual(['Best words,','no weaponizing.']);
+  await expect.poll(async()=>(await project()).media.wide.words.map(w=>w.t)).toEqual(['Best','words,','no','weaponizing.']);
+  saved=await project();
+  expect(saved.media.wide.cuesB.map(textOf)).toEqual(['mauvais mot.','mauvais mot.']);
+  expect(saved.media.wide.cues.map(c=>[c.id,c.startOverride,c.endOverride])).toEqual([['first',0,.9],['second',3,3.9]]);
+  expect(saved.rows[0].cards[0].cueRefs).toEqual(['first','second']);
+  await page.getByRole('button',{name:/Undo/}).first().click();
+  await expect.poll(async()=>(await project()).media.wide.words.map(w=>w.t)).toEqual(['better','word,','bad','word.']);
+  await expect.poll(async()=>(await project()).media.wide.cues.map(textOf)).toEqual(['better word,','bad word.']);
+  await page.getByRole('button',{name:/Redo/}).first().click();
+  await expect.poll(async()=>(await project()).media.wide.cues.map(textOf)).toEqual(['Best words,','no weaponizing.']);
+  await track.selectOption('A');
   await selectMedia('portrait');
   console.log('Transcript/subtitle replace, A/B scope, timing, Story refs and undo passed.');
 
