@@ -10,6 +10,7 @@ const directory = await mkdtemp(path.join(tmpdir(), 'transcriber-collaboration-b
 const server = createAppServer({ APP_PASSWORD: 'browser-collaboration-password', COLLAB_DATA_DIR: path.join(directory, 'data') });
 let browser;
 const errors = [];
+const requests = [], pages = [];
 const expect = baseExpect.configure({ timeout: 18000 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -21,6 +22,8 @@ try {
   async function pageAt(url) {
     const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
     const page = await context.newPage(); page.on('pageerror', e => errors.push(e.message));
+    pages.push(page);
+    page.on('requestfailed', request => {if(request.url().includes('/api/collaboration/')){requests.push({path:new URL(request.url()).pathname,error:request.failure()?.errorText});if(requests.length>20)requests.shift();}});
     await page.goto(url); await page.getByLabel('Workspace password').fill('browser-collaboration-password');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.locator('.docname')).toBeVisible(); return page;
@@ -101,6 +104,11 @@ try {
   await open(b); await b.screenshot({ path: '.test-temp/collaboration.png', fullPage: false });
   expect(errors).toEqual([]);
   console.log('Collaboration passed: password-link handoff, separate editor/viewer sessions, live presence, subtitles, nonconflicting merge, conflict resolution, offline reload recovery, shared video playback, personal navigation and local-project preservation.');
+} catch(error) {
+  console.error('Collaboration browser errors:',errors,'Recent request failures:',requests);
+  await mkdir('.test-temp',{recursive:true});
+  for(let i=0;i<pages.length;i++)await pages[i].screenshot({path:`.test-temp/sync-failure-${i}.png`,fullPage:false}).catch(()=>{});
+  throw error;
 } finally {
   await browser?.close(); server.closeAllConnections(); await new Promise(r => server.close(r));
   if (!path.basename(directory).startsWith('transcriber-collaboration-browser-')) throw Error('Invalid cleanup');

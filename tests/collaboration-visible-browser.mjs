@@ -8,7 +8,7 @@ const directory=await mkdtemp(path.join(tmpdir(),'transcriber-visible-team-'));
 const server=createAppServer({APP_PASSWORD:'visible-collaboration-password',COLLAB_DATA_DIR:directory},{collaboration:{onError:error=>console.error('Collaboration server error:',error)}});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const base=`http://127.0.0.1:${server.address().port}`;
-let browser;const errors=[];let pages=[];let debugProject;const commentResponses=[];
+let browser;const errors=[];let pages=[];let debugProject;const commentResponses=[],presenceSamples=[];
 try{
   browser=await chromium.launch({headless:true,...(process.env.BROWSER_CHANNEL==='chromium'?{}:{channel:process.env.BROWSER_CHANNEL||'msedge'})});
   const words=['Hello','team,','review','this','opening.','Another','short','sentence.'].map((t,i)=>({t,i,s:i*.6,e:(i+1)*.6,sp:'S1'}));
@@ -27,6 +27,7 @@ try{
     await context.addInitScript(value=>{if(!localStorage.getItem('transcriber.displayName'))localStorage.setItem('transcriber.displayName',value);},name);
     const page=await context.newPage();pages.push(page);page.on('pageerror',error=>errors.push(error.message));
     page.on('response',async response=>{if(response.url().includes('/discussion')){try{const data=await response.json();commentResponses.push({name,status:response.status(),error:data.error,revision:data.revision,unchanged:data.unchanged,counts:data.threads?.map(t=>t.messages.length)});}catch{}}});
+    page.on('response',async response=>{if(response.url().endsWith('/presence')){try{const data=await response.json();presenceSamples.push({name,people:data.people?.map(p=>({name:p.name,activity:p.activity}))});if(presenceSamples.length>12)presenceSamples.shift();}catch{}}});
     await page.goto(url);await page.getByLabel('Workspace password').fill('visible-collaboration-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await expect(page.locator('.docname')).toBeVisible();return page;
   }
@@ -66,7 +67,7 @@ try{
   await b.getByRole('button',{name:'View',exact:true}).click();await b.getByRole('button',{name:'125%',exact:true}).click();await b.locator('.tx > div[style*="z-index: 89"]').click({position:{x:10,y:10}});
   await select(a,'.ctext',2,8);await expect(remote(b,'caret')).toHaveCount(1);
   await expect.poll(async()=>{
-    const caretPosition=await b.locator('.ctext').first().evaluate(field=>{const node=field.firstChild,range=document.createRange();range.setStart(node,8);range.setEnd(node,8);return range.getBoundingClientRect().left;});
+    const caretPosition=await b.locator('.cue[data-collab-id="cue-1"] .ctext').evaluate(field=>{const node=field.firstChild,range=document.createRange();range.setStart(node,8);range.setEnd(node,8);return range.getBoundingClientRect().left;});
     const actual=await remote(b,'caret').boundingBox();return actual?Math.abs(actual.x-caretPosition):Infinity;
   }).toBeLessThan(3);
   await b.getByRole('button',{name:'View',exact:true}).click();await b.getByRole('button',{name:'100%',exact:true}).click();await b.locator('.tx > div[style*="z-index: 89"]').click({position:{x:10,y:10}});
@@ -119,5 +120,5 @@ try{
   await a.reload();await a.getByRole('button',{name:/^Comments /}).click();await a.getByLabel('Project comments').getByRole('button',{name:'All',exact:true}).click();await expect(a.getByLabel('Project comments').locator('.team-thread')).toHaveCount(3);
   await mkdir('.test-temp',{recursive:true});await a.screenshot({path:'.test-temp/collaboration-visible.png',fullPage:false});
   expect(errors).toEqual([]);console.log('Visible collaboration passed across all five modes: scoped coloured selections/carets, draft previews, timeline ranges/playheads, anchored comments, mentions, assignments, replies, resolve/reopen, viewer access, deleted anchors and reload.');
-}catch(error){await mkdir('.test-temp',{recursive:true});for(let i=0;i<pages.length;i++)await pages[i].screenshot({path:`.test-temp/visible-failure-${i}.png`,fullPage:false}).catch(()=>{});console.error('Browser errors:',errors);console.error('Comment responses:',commentResponses.slice(-25));if(debugProject){const stored=JSON.parse(await readFile(path.join(directory,debugProject+'.json'),'utf8'));console.error('Stored comments:',{revision:stored.discussion?.revision,threads:stored.discussion?.threads.map(t=>({resolved:t.resolved,messages:t.messages.map(m=>m.text)}))});}throw error;
+}catch(error){await mkdir('.test-temp',{recursive:true});for(let i=0;i<pages.length;i++)await pages[i].screenshot({path:`.test-temp/visible-failure-${i}.png`,fullPage:false}).catch(()=>{});console.error('Browser errors:',errors);console.error('Presence samples:',JSON.stringify(presenceSamples));console.error('Comment responses:',commentResponses.slice(-25));if(debugProject){const stored=JSON.parse(await readFile(path.join(directory,debugProject+'.json'),'utf8'));console.error('Stored comments:',{revision:stored.discussion?.revision,threads:stored.discussion?.threads.map(t=>({resolved:t.resolved,messages:t.messages.map(m=>m.text)}))});}throw error;
 }finally{await browser?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));if(!path.basename(directory).startsWith('transcriber-visible-team-'))throw Error('Invalid cleanup');await rm(directory,{recursive:true,force:true});}
