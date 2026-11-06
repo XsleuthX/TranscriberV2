@@ -28,7 +28,7 @@ export default function Collaboration({ collaboration: c, media, fileFor, onUplo
         <small>Display names identify active browsers; they are not verified user accounts.</small>
         {c.error && <p className="collab-alert" role="alert">{c.error}</p>}
         {!c.target ? <><p>Transcript, subtitles, Story, timelines, review decisions and team rules will be shared. Upload source media after creating the shared copy.</p><button className="collab-primary" disabled={c.busy || !c.canCreate} onClick={c.create}>{c.busy ? 'Creating…' : 'Create shared project'}</button></> : <>
-          <ul className="collab-people">{c.people.map(p => <li key={p.clientId}><span className="collab-dot" />{p.name}<small>{p.role}</small></li>)}</ul>
+          <ul className="collab-people">{c.people.map(p => <li key={p.clientId}><span className="collab-dot" style={{background:p.colour}} />{p.name}<small>{p.activity?.workspace?p.activity.workspace+' · ':''}{p.role}</small></li>)}</ul>
           {c.role === 'editor' && <>
             {link('Editor link', c.editorLink)}
             <button disabled={c.busy} onClick={c.newViewerLink}>Create / replace viewer link</button>

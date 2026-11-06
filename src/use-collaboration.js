@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { equal, mergeDocuments, projectLink } from './collaboration-core.js';
+import { emptyDiscussion, registerMember, applyDiscussionOperation } from './collaboration-activity.js';
+
+function browserIdentity(storage, key) {
+  let id = storage.getItem(key);
+  if (!/^[a-f0-9]{32}$/.test(id || '')) { id = crypto.randomUUID().replaceAll('-', ''); storage.setItem(key, id); }
+  return id;
+}
 
 export function sharedTarget() {
   // Password sign-in submits to a new URL. Restore the invitation fragment
@@ -18,12 +25,24 @@ const typing = () => {
 
 export default function useCollaboration({ ready, history, getDocument, applyDocument, documentVersion, settingsVersion, beforeCreate }) {
   const [target] = useState(sharedTarget);
+  useEffect(() => {
+    const changed = () => { if (!equal(sharedTarget(),target)) window.location.reload(); };
+    window.addEventListener('hashchange',changed);return()=>window.removeEventListener('hashchange',changed);
+  },[target]);
   const [state, setState] = useState({ status: target ? 'Connecting…' : 'Local project', ready: false,
-    role: null, revision: 0, people: [], conflict: null, error: '', viewerKey: '', busy: false });
+    role: null, revision: 0, people: [], members: [], presenceOnline: false, discussion: emptyDiscussion(), discussionError: '', commentBusy: false,
+    conflict: null, error: '', viewerKey: '', busy: false });
   const [name, setName] = useState(() => localStorage.getItem('transcriber.displayName') || 'Teammate');
+  useEffect(() => {
+    const changed = event => { if (event.key === 'transcriber.displayName') setName(event.newValue || 'Teammate'); };
+    window.addEventListener('storage',changed);return()=>window.removeEventListener('storage',changed);
+  },[]);
+  const [participantId] = useState(() => browserIdentity(localStorage, 'transcriber.participantId'));
+  const [clientId] = useState(() => browserIdentity(sessionStorage, 'transcriber.presenceTab'));
   const refs = useRef({}); refs.current.get = getDocument; refs.current.apply = applyDocument;
+  refs.current.state = state;
   const session = useRef({ base: null, revision: 0, role: null, conflict: null, busy: false, stopped: false,
-    clientId: crypto.randomUUID().replaceAll('-', ''), name, interacting: false }); session.current.name = name;
+    clientId, participantId, name, interacting: false, activity: null }); session.current.name = name;
   history.setReadOnly(!!target && (!state.ready || state.role !== 'editor'));
   const update = value => setState(s => ({ ...s, ...value }));
   useEffect(() => {
@@ -39,6 +58,38 @@ export default function useCollaboration({ ready, history, getDocument, applyDoc
     if (!response.ok && response.status !== 409) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || 'Shared project request failed.');
     return { data, conflict: response.status === 409 };
   };
+
+  // Presence runs independently of document synchronization, including during a
+  // conflict or native text edit. No project snapshot is written for a caret.
+  useEffect(() => {
+    if (!target || !ready) return;
+    const s = session.current; let stopped = false, timer, busy = false, urgent = false, lastDiscussion = 0;
+    const tick = async () => {
+      if (busy || stopped) return; busy = true; urgent = false;
+      try {
+        const { data } = await request('/presence', { method: 'POST', body: JSON.stringify({ clientId, participantId,
+          name: s.name.trim() || 'Teammate', activity: document.visibilityState === 'hidden' ? null : s.activity }) });
+        if (stopped) return;
+        update({ people: data.people, members: data.members || [], presenceOnline: true });
+        if (Date.now() - lastDiscussion > 1200) {
+          const { data: discussion } = await request('/discussion?revision=' + refs.current.state.discussion.revision);
+          if (stopped) return;
+          if (!discussion.unchanged) setState(current => ({ ...current, discussion: discussion.revision >= current.discussion.revision ? discussion : current.discussion, discussionError: '' }));
+          else update({ discussionError: '' });
+          lastDiscussion = Date.now();
+        }
+      } catch (error) {
+        if (!stopped) update({ people: [], presenceOnline: false, discussionError: error.message });
+      } finally {
+        busy = false; if (!stopped) timer = setTimeout(tick, urgent ? 80 : 600);
+      }
+    };
+    s.pulse = () => { urgent = true; clearTimeout(timer); if (!busy && !stopped) timer = setTimeout(tick, 80); };
+    const resumed = () => { if(document.visibilityState==='visible'){lastDiscussion=0;s.pulse?.();} };
+    window.addEventListener('focus',resumed);document.addEventListener('visibilitychange',resumed);
+    void tick();
+    return () => { stopped = true; clearTimeout(timer); s.pulse = null; window.removeEventListener('focus',resumed);document.removeEventListener('visibilitychange',resumed); };
+  }, [ready, target]);
 
   useEffect(() => {
     if (!target || !ready) return;
@@ -59,9 +110,6 @@ export default function useCollaboration({ ready, history, getDocument, applyDoc
       if (s.busy) return;
       s.busy = true;
       try {
-        const { data: presence } = await request('/presence', { method: 'POST', body: JSON.stringify({ clientId: s.clientId, name: s.name || 'Teammate' }) });
-        if (stopped) return;
-        update({ people: presence.people });
         if (s.conflict) return;
         // Defer incoming document updates until a native editor commits on blur.
         // Otherwise an uncommitted contentEditable change has no merge baseline.
@@ -120,7 +168,7 @@ export default function useCollaboration({ ready, history, getDocument, applyDoc
     // A tick lets native blur handlers commit their last edit before publishing.
     await new Promise(resolve => setTimeout(resolve, 0));
     await beforeCreate?.();
-    const { data } = await request('', { method: 'POST', body: JSON.stringify({ document: refs.current.get() }) }, null);
+    const { data } = await request('', { method: 'POST', body: JSON.stringify({ document: refs.current.get(), discussion: refs.current.state.discussion }) }, null);
     window.location.assign(projectLink(window.location, data.id, data.editorKey)); window.location.reload();
   });
   const newViewerLink = () => run(async () => {
@@ -139,9 +187,38 @@ export default function useCollaboration({ ready, history, getDocument, applyDoc
     onUploaded(assetKey, { id: data.id, name: file.name });
   });
   const mediaURL = fileId => `/api/collaboration/projects/${target.id}/media/${fileId}?key=${encodeURIComponent(target.key)}`;
+  const comment = async operation => {
+    update({ commentBusy: true, discussionError: '' });
+    try {
+      const op = { ...operation, id: operation.id || crypto.randomUUID().replaceAll('-', '') };
+      let discussion;
+      if (target) {
+        const result = await request('/discussion', { method: 'POST', body: JSON.stringify({ clientId, participantId, operation: op }) });
+        discussion = result.data;
+      } else {
+        const now = new Date().toISOString();
+        const current = registerMember(refs.current.state.discussion, participantId, name.trim() || 'Teammate', now);
+        discussion = applyDiscussionOperation(current, op, current.members.find(m => m.id === participantId), now);
+      }
+      setState(current => ({ ...current, discussion: discussion.revision >= current.discussion.revision ? discussion : current.discussion, members: discussion.members, commentBusy: false, discussionError: '' }));
+      return discussion;
+    } catch (error) { update({ commentBusy: false, discussionError: error.message }); throw error; }
+  };
+  const refreshDiscussion = async () => {
+    if(!target)return refs.current.state.discussion;
+    try {
+      const {data}=await request('/discussion');
+      setState(current=>({...current,discussion:data.revision>=current.discussion.revision?data:current.discussion,discussionError:''}));
+      return data;
+    }catch(error){update({discussionError:error.message});throw error;}
+  };
   return { ...state, target, name, setName: value => { setName(value); localStorage.setItem('transcriber.displayName', value); },
+    clientId, participantId, comment, refreshDiscussion, setActivity: value => { if (!equal(session.current.activity,value)) { session.current.activity = value; session.current.pulse?.(); } },
     create, newViewerLink, resolve, upload, mediaURL, canCreate: ready,
-    hydrate: checkpoint => { if (checkpoint?.base && Number.isSafeInteger(checkpoint.revision)) { session.current.base = checkpoint.base; session.current.revision = checkpoint.revision; } },
+    hydrate: (checkpoint, discussion) => {
+      if (checkpoint?.base && Number.isSafeInteger(checkpoint.revision)) { session.current.base = checkpoint.base; session.current.revision = checkpoint.revision; }
+      if (discussion) update({ discussion, members: discussion.members || [] });
+    },
     checkpoint: () => ({ base: session.current.base, revision: session.current.revision }),
     editorLink: target && state.role === 'editor' ? projectLink(window.location, target.id, target.key) : '',
     viewerLink: state.viewerKey ? projectLink(window.location, target.id, state.viewerKey) : '',

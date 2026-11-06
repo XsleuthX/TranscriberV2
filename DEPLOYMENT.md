@@ -1,7 +1,11 @@
-# Host Transcriber v2.41
+# Host Transcriber v2.42
 
 The source repository is https://github.com/XsleuthX/TranscriberV2.
-Deploy this app to one Node/container service. A hosting provider has not yet been selected.
+The current test app is https://transcriberv2.onrender.com, using one Docker web
+service on Render with automatic deployments from `main`. Its free instance uses
+temporary storage. Shared projects, comments and uploaded footage need a paid
+instance with a persistent disk at `/app/data` to survive restarts/redeploys.
+See [Render's disk requirements](https://render.com/docs/disks).
 
 ## How it works
 
@@ -52,8 +56,8 @@ Use `/healthz` for the host health check.
 ## Try the container locally
 
 ```powershell
-docker build -t transcriber:2.41 .
-docker run --rm -p 3000:3000 --env-file .env -v transcriber-data:/app/data transcriber:2.41
+docker build -t transcriber:2.42 .
+docker run --rm -p 3000:3000 --env-file .env -v transcriber-data:/app/data transcriber:2.42
 ```
 
 For that local test, set `APP_ORIGIN=http://localhost:3000` and a workspace

@@ -3,6 +3,7 @@ import './story-document.css';
 import Collaboration from './Collaboration.jsx';
 import useCollaboration, { sharedTarget } from './use-collaboration.js';
 import { sharedDocument } from './collaboration-core.js';
+import CollaborationWorkspace from './CollaborationWorkspace.jsx';
 import { editTranscript } from './transcript-edit.js';
 import BatchTranscribe from './BatchTranscribe.jsx';
 import {serialScheduler,transcribeQueue,cacheAudio} from './media-queue.js';
@@ -1384,7 +1385,7 @@ export default function Transcriber() {
   const pcmStore = useRef(new Map());
   const collaboration = useCollaboration({ ready: restored, history,
     documentVersion: documentState, settingsVersion: [projectName, dict, prime],
-    beforeCreate: () => saveProject({ ...history.current, media: serialisable(history.current.media), activeAsset,
+    beforeCreate: () => saveProject({ ...history.current, media: serialisable(history.current.media), activeAsset, discussion: collaboration.discussion,
       ui: { storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime }, v: 1 }),
     getDocument: () => sharedDocument(history.current, { projectName, dictionary: dict, priming: prime }),
     applyDocument: next => {
@@ -1554,8 +1555,8 @@ export default function Transcriber() {
     loadProject().then((doc) => {
       if (!live || !doc) { setRestored(true); return; }
       history.replace({ ...history.current, ...Object.fromEntries(['media','rows','mtl','rules','reviews','vet'].filter(k => doc[k] != null).map(k => [k,doc[k]])) });
+      collaboration.hydrate(doc.collaboration, doc.discussion);
       if (collaboration.target) {
-        collaboration.hydrate(doc.collaboration);
         history.replace({ ...history.current, media: Object.fromEntries(Object.entries(history.current.media).map(([id, asset]) =>
           [id, { ...asset, url: asset.sharedFile ? collaboration.mediaURL(asset.sharedFile.id) : asset.url }])) });
       }
@@ -1584,14 +1585,14 @@ export default function Transcriber() {
     setSaved("saving");
     const t = setTimeout(() => {
       if (importingProject.current) return;
-      saveProject({ media: serialisable(media), rows, mtl, rules, reviews, vet, activeAsset,
+      saveProject({ media: serialisable(media), rows, mtl, rules, reviews, vet, activeAsset, discussion: collaboration.discussion,
         ui: { storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime },
         ...(collaboration.target ? { collaboration: collaboration.checkpoint() } : {}), v: 1 })
         .then(() => setSaved("saved"))
         .catch(() => setSaved("error"));
     }, 900);
     return () => clearTimeout(t);
-  }, [media, rows, mtl, rules, reviews, vet, activeAsset, restored, storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime, collaboration.revision]);
+  }, [media, rows, mtl, rules, reviews, vet, activeAsset, restored, storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime, collaboration.revision, collaboration.discussion]);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2800); return () => clearTimeout(t); }, [toast]);
   useEffect(() => {
@@ -3630,7 +3631,7 @@ export default function Transcriber() {
   const baseName = () => (cur.name || "captions").replace(/\.[^.]+$/, "");
   const exportProjectFile = () => {
     try {
-      const json = exportProjectJSON({ ...history.current, activeAsset, ui: { storyAudio, projectName, docSize, uiZoom, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime } });
+      const json = exportProjectJSON({ ...history.current, activeAsset, discussion: collaboration.discussion, ui: { storyAudio, projectName, docSize, uiZoom, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime } });
       save((projectName || 'Transcriber project').replace(/[<>:"/\\|?*]/g, '_') + '.transcriber.json', json, 'application/json');
       setToast('Project exported with cached audio. Relink videos or reconnect Iconik after importing.');
     } catch (error) { setToast('Project export failed: ' + error.message); }
@@ -3684,6 +3685,7 @@ export default function Transcriber() {
       if (modal) { if (e.key === "Escape") setModal(null); return; }
       if (ctx && e.key === "Escape") { setCtx(null); return; }
       if (document.querySelector('dialog[open], [aria-label="Project collaboration"]')) return;
+      if ((e.target.closest?.('.team-ui') || window.getSelection()?.anchorNode?.parentElement?.closest('.team-ui')) && !/^F[1-5]$/.test(e.key)) return;
       if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&['transcript','subtitle'].includes(ws)){e.preventDefault();setFindOpen(true);requestAnimationFrame(()=>document.querySelector('[aria-label="Find text"]')?.focus());return;}
       if(e.key==='Escape'&&findOpen){setFindOpen(false);e.target.blur?.();return;}
       if (typing) return;
@@ -3835,6 +3837,39 @@ export default function Transcriber() {
   }, [activeCard, rows]);
 
   /* ═══════════════════════════ render ═══════════════════════════════════ */
+
+  const [teamJump,setTeamJump] = useState(null);
+  useEffect(() => {
+    if(!teamJump || ws!==teamJump.workspace || (teamJump.assetKey && activeAsset!==teamJump.assetKey))return;
+    if(teamJump.kind==='cue'){
+      const list=teamJump.track==='B'?cuesB:cuesA, index=list.findIndex(c=>c.id===teamJump.id);
+      if(index>=0){setSelCue(index);setFollowTarget(index);if(teamJump.track==='B')setFollowB(index);else setFollowA(index);}
+    }
+    if(teamJump.kind==='transcript'){
+      const index=turns.findIndex(t=>t.words.some(w=>w.i===(teamJump.wordStart??Number(teamJump.id)) || (teamJump.timeStart!=null&&w.s<=teamJump.timeStart&&w.e>=teamJump.timeStart)));
+      if(index>=0)setFollowTurn(index);
+    }
+    setTeamJump(null);
+  },[teamJump,ws,activeAsset,turns,cuesA,cuesB]);
+  const navigateTeam = anchor => {
+    if(anchor.assetKey&&!Object.hasOwn(media,anchor.assetKey)){setToast('The original source was removed. The comment and quoted text are retained.');return;}
+    setWs(anchor.workspace);if(anchor.assetKey)setActiveAsset(anchor.assetKey);
+    if(anchor.track){setTrack(anchor.track);setOverlayTrack(anchor.track);}
+    if(anchor.kind==='card'||anchor.cardId){const cardId=anchor.cardId||anchor.id;const row=rows.find(r=>r.cards.some(c=>c.id===cardId));if(row)setActiveCard({rowId:row.id,cardId});}
+    if(anchor.kind==='clip')setSelClip(anchor.id);
+    if(anchor.kind==='multi')setMtlSel(new Set(anchor.selectionIds?.length?anchor.selectionIds:[anchor.id]));
+    if(anchor.timeStart!=null){setPlaying(false);videoRef.current?.pause();if(anchor.assetKey&&anchor.assetKey!==activeAsset){pendingStorySeek.current=media[anchor.assetKey]?.url?{key:anchor.assetKey,time:anchor.timeStart}:null;setTime(anchor.timeStart);}else seek(anchor.timeStart);}
+    setTeamJump({...anchor});
+  };
+  const teamContext = { workspace:ws, kind:'view', id:'workspace', assetKey:ws==='multi'?undefined:activeAsset, track:ws==='multi'?undefined:editTrack, timeStart:time, playhead:time };
+  if(ws==='transcript'&&selRange){
+    const first=turns.find(t=>t.words.some(w=>w.i===selRange.a||w===words[selRange.a]));
+    Object.assign(teamContext,{kind:'transcript',id:String(words.indexOf(first?.words[0])),wordStart:selRange.a,wordEnd:selRange.b,selectionIds:turns.filter(t=>words.indexOf(t.words[0])<=selRange.b&&words.indexOf(t.words.at(-1))>=selRange.a).map(t=>String(words.indexOf(t.words[0]))).slice(0,100),quote:transcriptText(words,selRange).slice(0,600),timeStart:words[selRange.a]?.s||0,timeEnd:words[selRange.b]?.e});
+  }
+  if(ws==='subtitle'&&selCue!=null&&cues[selCue])Object.assign(teamContext,{kind:'cue',id:cues[selCue].id,selectionIds:[...rowSel].map(i=>cues[i]?.id).filter(Boolean).slice(0,100),timeStart:cueTime(cues[selCue],words).start});
+  if(ws==='story'&&activeCard){const card=rows.find(r=>r.id===activeCard.rowId)?.cards.find(c=>c.id===activeCard.cardId);if(card)Object.assign(teamContext,{kind:'card',id:card.id,cardId:card.id,rowId:activeCard.rowId,assetKey:card.assetKey||'',timeStart:card.sin||0});}
+  if(ws==='timeline'){const clip=clips.find(c=>c.id===selClip);Object.assign(teamContext,{kind:selClip?'clip':'range',id:selClip||'source-range',timeStart:tlSel?.start??clip?.in??time,timeEnd:tlSel?.end??clip?.out});}
+  if(ws==='multi'){const clip=mtl.clips.find(c=>mtlSel.has(c.id));const start=mtlMarks.in??clip?.pin??time;Object.assign(teamContext,{kind:mtlSel.size?'multi':'range',id:[...mtlSel][0]||'sequence-range',selectionIds:[...mtlSel].slice(0,100),timeStart:start,timeEnd:mtlMarks.out!=null&&mtlMarks.out>start?mtlMarks.out:clip?.pout});}
 
   return (
     <AIReviewContext.Provider value={{ flags: [...liveReviews,...vetFlags], activeAsset, editTrack, reveal: f => f.origin==='vet'?revealVet(f,true):revealReview(f), apply: f => f.origin==='vet'?applyVetFlags([f]):applyReview(f), dismiss: f => f.origin==='vet'?dismissVetFlags([f]):dismissReview(f) }}>
@@ -4006,6 +4041,7 @@ export default function Transcriber() {
 
       </div>
 
+      <CollaborationWorkspace collaboration={collaboration} document={documentState} context={teamContext} onNavigate={navigateTeam} />
       <div className="body">
         {/* viewer — resizable, only where the work surface is text */}
         {(
@@ -4098,7 +4134,7 @@ export default function Transcriber() {
         )}
 
         {/* surface */}
-        <div className="surface" data-ac={String(activeCue)} data-at={String(activeTurn)} data-follow={String(follow)}>
+        <div className="surface" data-collab-workspace={ws} data-collab-asset={activeAsset} data-collab-track={editTrack} data-ac={String(activeCue)} data-at={String(activeTurn)} data-follow={String(follow)}>
           {vetOnlyView && <><VetIssues flags={visibleVet} onReveal={revealVet} onApply={applyVetFlags} onDismiss={dismissVetFlags}/><Transport {...{ playing, toggle, time, duration, seek }} /></>}
           {!vetOnlyView && ws === "transcript" && (
             <>
@@ -4117,6 +4153,7 @@ export default function Transcriber() {
                           {!t.cont && <div className="spkbar" style={{ background: sp.color }} />}
                         </div>
                         <TranscriptLine
+                          anchorStart={words.indexOf(t.words[0])} anchorEnd={words.indexOf(t.words.at(-1))}
                           turn={t} time={time} sel={selRange}
                           onSeek={(x) => { hold(); seek(x); }} onSelect={setSel}
                           onFocus={() => setEditTurn(ti)} onBlurLine={() => setEditTurn(null)}
@@ -4211,6 +4248,7 @@ export default function Transcriber() {
                     return (
                       <div className="cues" style={{ padding: "0 24px" }}>
                         <CueRow c={c} i={i} words={words} rules={rules}
+                          reviewTrack={editTrack}
                           now={i === activeCue} selected={selCue === i} used={used.get(canonRef(c.id))}
                           inRange={rowSel.has(i)}
                           onRowDown={(e) => rowMouseDown(i, e)}
@@ -6558,7 +6596,7 @@ function Viewer({
 
 /* ═══ transcript line ═══════════════════════════════════════════════════ */
 
-function TranscriptLine({ turn, time, sel, onSeek, onSelect, onCommit, onFocus, onBlurLine }) {
+function TranscriptLine({ turn, time, sel, onSeek, onSelect, onCommit, onFocus, onBlurLine, anchorStart, anchorEnd }) {
   const T = useTcd();
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -6574,7 +6612,7 @@ function TranscriptLine({ turn, time, sel, onSeek, onSelect, onCommit, onFocus, 
   useEffect(() => { if(editing&&ref.current){ref.current.textContent=text;ref.current.focus();} }, [editing]);
   if (editing)
     return (
-      <div key="edit" ref={ref} className="line editing" contentEditable suppressContentEditableWarning aria-label="Edit transcript paragraph"
+      <div key="edit" ref={ref} className="line editing" data-collab-kind="transcript" data-collab-id={String(anchorStart)} data-collab-field="text" data-collab-word-start={anchorStart} data-collab-word-end={anchorEnd} data-collab-start={turn.words[0]?.s} contentEditable suppressContentEditableWarning aria-label="Edit transcript paragraph"
         onBlur={(e) => { setEditing(false); onBlurLine?.(); onCommit(e.currentTarget.innerText); }}
         onKeyDown={(e) => {
           if (e.key === "Escape") { e.currentTarget.innerText = text; e.currentTarget.blur(); }
@@ -6583,22 +6621,23 @@ function TranscriptLine({ turn, time, sel, onSeek, onSelect, onCommit, onFocus, 
     );
 
   return (
-    <div key="read" className="line" onDoubleClick={() => { onFocus?.(); setEditing(true); }}
+    <div key="read" className="line" data-collab-kind="transcript" data-collab-id={String(anchorStart)} data-collab-word-start={anchorStart} data-collab-word-end={anchorEnd} data-collab-start={turn.words[0]?.s} onDoubleClick={() => { onFocus?.(); setEditing(true); }}
       title="Click a word to seek · double-click the line to rewrite it">
-      <ReviewHint kind="transcript" wordStart={turn.words[0]?.i} wordEnd={turn.words.at(-1)?.i} startTime={turn.words[0]?.s} endTime={turn.words.at(-1)?.e} />
-      {turn.words.map((w) => {
+      <ReviewHint kind="transcript" wordStart={anchorStart} wordEnd={anchorEnd} startTime={turn.words[0]?.s} endTime={turn.words.at(-1)?.e} />
+      <span data-collab-field="text">{turn.words.map((w,offset) => {
+        const index=anchorStart+offset;
         const now = time >= w.s && time < w.e;
-        const inSel = sel && w.i >= sel.a && w.i <= sel.b;
+        const inSel = sel && index >= sel.a && index <= sel.b;
         return (
-          <span key={w.i} data-word-index={w.i}
+          <span key={index} data-word-index={index}
             className={`w${now ? " now" : ""}${w.edited ? " ed" : ""}${inSel ? " sel" : ""}`}
-            onMouseDown={(e) => { if (e.detail > 1) return; setDragging(true); onSelect({ a: w.i, b: w.i }); onSeek(w.s); }}
-            onMouseEnter={() => { if (dragging) onSelect((p) => (p ? { ...p, b: w.i } : { a: w.i, b: w.i })); }}
+            onMouseDown={(e) => { if (e.detail > 1) return; setDragging(true); onSelect({ a: index, b: index }); onSeek(w.s); }}
+            onMouseEnter={() => { if (dragging) onSelect((p) => (p ? { ...p, b: index } : { a: index, b: index })); }}
             title={T(w.s)}>
-            {w.t}{" "}
+            {w.t}{offset<turn.words.length-1?" ":""}
           </span>
         );
-      })}
+      })}</span>
     </div>
   );
 }
@@ -6641,7 +6680,7 @@ function CueRow({ c, i, words, reviewTrack, rules, now, selected, used, onSelect
   }, []);
 
   return (
-    <div ref={rowRef} data-cue={i}
+    <div ref={rowRef} data-cue={i} data-collab-kind="cue" data-collab-id={c.id} data-collab-track={reviewTrack||'A'} data-collab-start={t.start} data-collab-end={t.end}
       className={`cue${now ? " now" : ""}${selected ? " sel" : ""}${compact ? " compact" : ""}${inRange ? " inrange" : ""}`}
       onMouseEnter={onRowEnter}
       onMouseDown={onSelect}
@@ -6665,7 +6704,7 @@ function CueRow({ c, i, words, reviewTrack, rules, now, selected, used, onSelect
       <div>
         <ReviewHint kind="cue" id={c.id} track={reviewTrack} />
         {compact && <div className="ctc">{T(t.start)} → {T(t.end)}</div>}
-        <div ref={editorRef} className={`ctext${text ? "" : " blank"}`} contentEditable suppressContentEditableWarning
+        <div ref={editorRef} data-collab-field="text" className={`ctext${text ? "" : " blank"}`} contentEditable suppressContentEditableWarning
           onMouseDown={() => onSeek(t.start)}
           onFocus={() => { onSelect(); onFocusRow?.(); }}
           onInput={() => { dirtyRef.current = true; }}
@@ -6917,7 +6956,7 @@ function TimelineMode({
       <div className="tlscroll" ref={scrollRef}>
         <div className="tlcontent" style={{ width }}>
           <Ruler dur={duration} pps={pxPerSec} onSeek={seek} offset={0} />
-          <div className="tllane" ref={laneRef} onMouseDown={laneDown}>
+          <div className="tllane" ref={laneRef} data-collab-lane="source" data-collab-pps={pxPerSec} onMouseDown={laneDown}>
             {tlSel && tlSel.end > tlSel.start && (
               <>
                 <div className="tlsel" style={{ left: tlSel.start * pxPerSec, width: (tlSel.end - tlSel.start) * pxPerSec }} />
@@ -6950,7 +6989,7 @@ function TimelineMode({
               </>
             )}
             {clips.map((c, idx) => (
-              <div key={c.id}
+              <div key={c.id} data-collab-kind="clip" data-collab-id={c.id} data-collab-start={c.in} data-collab-end={c.out}
                 className={`tlclip${selClip === c.id ? " sel" : ""}${c.enabled === false ? " off" : ""}`}
                 style={{ left: c.in * pxPerSec, width: Math.max((c.out - c.in) * pxPerSec, 14), background: c.color }}
                 onMouseDown={(e) => clipDown(e, c, "move")}
@@ -6966,7 +7005,7 @@ function TimelineMode({
                 const txt = cueText(c, words);
                 const w = Math.max((t.end - t.start) * pxPerSec, 2);
                 return (
-                  <div key={c.id} className={`tlcue${activeCueIdx === i ? " on" : ""}`}
+                  <div key={c.id} data-collab-kind="cue" data-collab-id={c.id} data-collab-start={t.start} data-collab-end={t.end} className={`tlcue${activeCueIdx === i ? " on" : ""}`}
                     title={`${T(t.start)} → ${T(t.end)}\n${txt}`}
                     onMouseDown={(ev) => { ev.stopPropagation(); seek(t.start); }}
                     style={{ left: t.start * pxPerSec, width: w,
@@ -7001,7 +7040,7 @@ function TimelineMode({
           </div>
         )}
         {clips.length ? clips.map((c, idx) => (
-          <div key={c.id} data-clip-id={c.id} className={`cliprow${selClip === c.id ? " sel" : ""}`}
+          <div key={c.id} data-clip-id={c.id} data-collab-kind="clip" data-collab-id={c.id} data-collab-selected={picked.has(c.id)} data-collab-start={c.in} data-collab-end={c.out} className={`cliprow${selClip === c.id ? " sel" : ""}`}
             onClick={() => { setSelClip(c.id); seek(c.in); }}>
             <input type="checkbox" checked={picked.has(c.id)} onClick={(e) => e.stopPropagation()}
               onChange={() => setPicked((p2) => {
@@ -7016,7 +7055,7 @@ function TimelineMode({
             <input className="swatch" type="color" value={c.color}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => patchClip(c.id, { color: e.target.value })} />
-            <input className="nm" value={c.label} onClick={(e) => e.stopPropagation()}
+            <input className="nm" data-collab-field="label" value={c.label} onClick={(e) => e.stopPropagation()}
               onChange={(e) => patchClip(c.id, { label: e.target.value })} />
             <ReviewHint kind="clip" id={c.id} />
             <span className="tm">{tc(c.in)} → {tc(c.out)}</span>
@@ -7195,7 +7234,7 @@ function DocCard({
   const range = cardRange(c,ownCues,ownWords);
 
   return (
-    <div className={`dcard${on ? " on" : ""}`} data-card-id={c.id} data-shot={c.label} onClick={onSelect}>
+    <div className={`dcard${on ? " on" : ""}`} data-card-id={c.id} data-collab-kind="card" data-collab-id={c.id} data-collab-asset={c.assetKey||''} data-collab-track={ownCues===asset?.cuesB?'B':'A'} data-collab-start={range.start} data-collab-end={range.end} data-shot={c.label} onClick={onSelect}>
       <div className="kb" style={{ background: KIND_COLOR[c.kind] }} />
 
       {/* Only this handle starts a card drag — dragging the body would make
@@ -7222,7 +7261,7 @@ function DocCard({
       </div>
 
       {!live && (
-        <input className="dtitle" value={c.title} placeholder="Clip / card name"
+        <input className="dtitle" data-collab-field="title" value={c.title} placeholder="Clip / card name"
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => onPatch({ title: e.target.value })} />
       )}
@@ -7261,7 +7300,7 @@ function DocCard({
           {linked.map((cu) => {
             const t = cueTime(cu, ownWords);
             return (
-              <div className="mline" key={cu.id}
+              <div className="mline" key={cu.id} data-collab-kind="cue" data-collab-id={cu.id} data-collab-start={t.start} data-collab-end={t.end}
                 /* Editing here is subtitle editing, so it offers the same menu
                    and shortcuts — scoped to the cue list this card points at,
                    which may not be the mounted asset. */
@@ -7273,7 +7312,7 @@ function DocCard({
                   onClick={(e) => { e.stopPropagation(); onSeek(t.start); }}>
                   {formatCardTime(t.start)} → {formatCardTime(t.end)}
                 </button>
-                <div className="mtxt" contentEditable suppressContentEditableWarning
+                <div className="mtxt" data-collab-field="text" contentEditable suppressContentEditableWarning
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => { e.stopPropagation(); onSelect(); onSeek(t.start); }}
                   onFocus={e => { e.currentTarget.dataset.beforeEdit = e.currentTarget.innerText; e.currentTarget.dataset.dirty = ""; }}
@@ -7304,7 +7343,7 @@ function DocCard({
       )}
 
       {notes && (
-        <textarea className="dnotes" value={c.notes} placeholder="Producer notes / edit instructions"
+        <textarea className="dnotes" data-collab-field="notes" value={c.notes} placeholder="Producer notes / edit instructions"
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => onPatch({ notes: e.target.value })} />
       )}
@@ -7548,7 +7587,7 @@ function MultiTimeline({
 
   useEffect(() => {
     const h = (e) => {
-      if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable) return;
+      if (e.target.closest?.('.team-ui, .collab-panel') || window.getSelection()?.anchorNode?.parentElement?.closest('.team-ui') || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable) return;
       if (e.key === "b" || e.key === "B") { e.preventDefault(); onRazor(); }
       if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onDelete(e.shiftKey); }
       if (e.key === "i") setMarks((m) => ({ ...m, in: time }));
@@ -7608,7 +7647,7 @@ function MultiTimeline({
         <div style={{ flex: "0 0 auto", minWidth: `calc(100% - ${headW}px)` }}>
           <div style={{ width, position: "relative" }}>
             <div style={{ position: 'sticky', top: 0, zIndex: 9, background: 'var(--bay2)' }}><Ruler dur={Math.max(dur, 10)} pps={zoom} onSeek={seek} offset={0} /></div>
-            <div ref={lanesRef} style={{ position: "relative" }}>
+            <div ref={lanesRef} data-collab-lane="sequence" data-collab-pps={zoom} style={{ position: "relative" }}>
               {ordered.map((t) => {
                 const h = laneHeight(t);
                 const dim = t.locked || (t.kind === "audio" && (t.muted || (soloed && !t.solo))) ||
@@ -7618,7 +7657,7 @@ function MultiTimeline({
                     style={{ position: "relative", height: h, borderBottom: "1px solid var(--rule)",
                       background: t.kind === "video" ? "var(--bay)" : "#12151A", opacity: dim ? 0.4 : 1 }}>
                     {doc.clips.filter((c) => c.trackId === t.id).map((c) => (
-                      <div key={c.id} className="mtlclip" data-multi-id={c.id}
+                      <div key={c.id} className="mtlclip" data-multi-id={c.id} data-collab-kind="multi" data-collab-id={c.id} data-collab-asset={c.assetKey||''} data-collab-start={c.pin} data-collab-end={c.pout}
                         title={`${c.title || t.kind} · ${media[c.assetKey]?.name || 'No source'}\nTimeline ${tc(c.pin)} → ${tc(c.pout)}\nSource ${tc(c.sin)} → ${tc(c.sout)}${t.locked ? '\nTrack locked' : '\nDrag to move; drag either edge to trim'}`}
                         onMouseDown={(e) => clipDown(e, c, "move")}
                         onContextMenu={(e) => { e.preventDefault(); onCtx({ x: e.clientX, y: e.clientY, clip: c }); }}

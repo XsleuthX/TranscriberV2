@@ -47,6 +47,7 @@ jobs:
           npm run test:story-layout-browser
           npm run test:assembly-browser
           npm run test:collaboration-browser
+          npm run test:collaboration-visible-browser
       - name: Build deployment image
         run: docker build -t transcriber:verified .
       - name: Start and verify production container
@@ -57,3 +58,11 @@ jobs:
             transcriber:verified)
           trap 'docker logs "$container"; docker rm -f "$container" >/dev/null' EXIT
           docker exec -i "$container" node --input-type=module < tests/container-smoke.mjs
+      - name: Retain browser failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .test-temp/*failure*.png
+          if-no-files-found: ignore
+          retention-days: 7
