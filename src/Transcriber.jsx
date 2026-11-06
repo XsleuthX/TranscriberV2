@@ -1,5 +1,8 @@
 import { storyRange, manualStoryRange, saveStoryRange, storyGroupRange, parseStoryTimecode } from './story-range.js';
 import './story-document.css';
+import Collaboration from './Collaboration.jsx';
+import useCollaboration, { sharedTarget } from './use-collaboration.js';
+import { sharedDocument } from './collaboration-core.js';
 import { editTranscript } from './transcript-edit.js';
 import BatchTranscribe from './BatchTranscribe.jsx';
 import {serialScheduler,transcribeQueue,cacheAudio} from './media-queue.js';
@@ -1379,6 +1382,38 @@ export default function Transcriber() {
   const fileStore = useRef(new Map());
   // assetKey → Float32Array of 16 kHz mono samples, decoded once at import.
   const pcmStore = useRef(new Map());
+  const collaboration = useCollaboration({ ready: restored, history,
+    documentVersion: documentState, settingsVersion: [projectName, dict, prime],
+    beforeCreate: () => saveProject({ ...history.current, media: serialisable(history.current.media), activeAsset,
+      ui: { storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime }, v: 1 }),
+    getDocument: () => sharedDocument(history.current, { projectName, dictionary: dict, priming: prime }),
+    applyDocument: next => {
+      const media = Object.fromEntries(Object.entries(next.media).map(([id, asset]) => {
+        const previous = history.current.media[id];
+        const resources = previous && previous.sharedFile?.id === asset.sharedFile?.id ?
+          Object.fromEntries(['url','pcm','pcmRate','offline','audioError'].filter(k => k in previous).map(k => [k,previous[k]])) : {};
+        const url = asset.sharedFile ? collaboration.mediaURL(asset.sharedFile.id) : resources.url || null;
+        return [id, { ...asset, ...resources, url, offline: !url }];
+      }));
+      const { settings, ...document } = next;
+      history.replace({ ...document, media });
+      setProjectName(settings.projectName); setDict(settings.dictionary || { asr: [], tr: [] });
+      if (typeof settings.priming === 'boolean') setPrime(settings.priming);
+      if (!media[activeAsset]) setActiveAsset(Object.keys(media)[0]);
+      setSel(null); setSelCue(null); setActiveCard(null); setMtlSel(new Set());
+    }
+  });
+  const sharedReadOnly = !!collaboration.target && (!collaboration.ready || collaboration.role !== 'editor');
+  const onSharedUpload = (assetKey, sharedFile) => setMedia(current => {
+    if (!current[assetKey]) return current;
+    return { ...current, [assetKey]: { ...current[assetKey], sharedFile, url: collaboration.mediaURL(sharedFile.id), offline: false } };
+  });
+  useEffect(() => {
+    if (!sharedReadOnly) return;
+    const block = event => { if (event.target.isContentEditable) { event.preventDefault(); setToast('This project is view only. Ask for an editor link to make changes.'); } };
+    document.addEventListener('beforeinput', block, true);
+    return () => document.removeEventListener('beforeinput', block, true);
+  }, [sharedReadOnly]);
   const storeSamples=(key,samples)=>cacheAudio(pcmStore.current,key,samples,{protectedKeys:new Set([audioTasks.current.current?.assetKey]),recoverable:k=>!!(fileStore.current.has(k)||history.current.media[k]?.pcm||history.current.media[k]?.iconik)});
   const localAudioJobs = useRef(new Map());
   const prepareLocalAudio = (key, file, progress) => {
@@ -1518,12 +1553,12 @@ export default function Transcriber() {
     let live = true;
     loadProject().then((doc) => {
       if (!live || !doc) { setRestored(true); return; }
-      if (doc.media) setMedia(doc.media);
-      if (doc.rows) setRows(doc.rows);
-      if (doc.mtl) setMtl(doc.mtl);
-      if (doc.rules) setRules(doc.rules);
-      if (Array.isArray(doc.reviews)) setReviews(doc.reviews);
-      if (validVet(doc.vet)) setVet(doc.vet);
+      history.replace({ ...history.current, ...Object.fromEntries(['media','rows','mtl','rules','reviews','vet'].filter(k => doc[k] != null).map(k => [k,doc[k]])) });
+      if (collaboration.target) {
+        collaboration.hydrate(doc.collaboration);
+        history.replace({ ...history.current, media: Object.fromEntries(Object.entries(history.current.media).map(([id, asset]) =>
+          [id, { ...asset, url: asset.sharedFile ? collaboration.mediaURL(asset.sharedFile.id) : asset.url }])) });
+      }
       if (doc.activeAsset && doc.media?.[doc.activeAsset]) setActiveAsset(doc.activeAsset);
       if (doc.ui) {
         if (typeof doc.ui.storyAudio === 'boolean') setStoryAudio(doc.ui.storyAudio);
@@ -1550,12 +1585,13 @@ export default function Transcriber() {
     const t = setTimeout(() => {
       if (importingProject.current) return;
       saveProject({ media: serialisable(media), rows, mtl, rules, reviews, vet, activeAsset,
-        ui: { storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime }, v: 1 })
+        ui: { storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dictionary: dict, priming: prime },
+        ...(collaboration.target ? { collaboration: collaboration.checkpoint() } : {}), v: 1 })
         .then(() => setSaved("saved"))
         .catch(() => setSaved("error"));
     }, 900);
     return () => clearTimeout(t);
-  }, [media, rows, mtl, rules, reviews, vet, activeAsset, restored, storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime]);
+  }, [media, rows, mtl, rules, reviews, vet, activeAsset, restored, storyAudio, docSize, uiZoom, projectName, ws, track, mtlZoom, mtlSnap, dict, prime, collaboration.revision]);
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2800); return () => clearTimeout(t); }, [toast]);
   useEffect(() => {
@@ -3357,7 +3393,7 @@ export default function Transcriber() {
     if (audioTasks.current.current?.assetKey === key) cancelAudioTask();
     pcmStore.current.delete(key);
     fileStore.current.set(key, file);
-    patchAsset(key, { pcm: null, audioError: null, url: URL.createObjectURL(file), offline: false, name: file.name, size: file.size, mimeType: file.type, mediaKind: file.type.startsWith("audio/") ? "audio" : "video", width: null, height: null });
+    patchAsset(key, { pcm: null, audioError: null, url: URL.createObjectURL(file), offline: false, ...(!collaboration.target ? { name: file.name } : {}), size: file.size, mimeType: file.type, mediaKind: file.type.startsWith("audio/") ? "audio" : "video", width: null, height: null });
     setToast(`Relinked ${file.name} — decoding audio…`);
     try {
       await prepareLocalAudio(key, file);
@@ -3647,7 +3683,7 @@ export default function Transcriber() {
       if (keyModal) { if (e.key === "Escape") setKeyModal(null); return; }
       if (modal) { if (e.key === "Escape") setModal(null); return; }
       if (ctx && e.key === "Escape") { setCtx(null); return; }
-      if (document.querySelector('dialog[open]')) return;
+      if (document.querySelector('dialog[open], [aria-label="Project collaboration"]')) return;
       if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&['transcript','subtitle'].includes(ws)){e.preventDefault();setFindOpen(true);requestAnimationFrame(()=>document.querySelector('[aria-label="Find text"]')?.focus());return;}
       if(e.key==='Escape'&&findOpen){setFindOpen(false);e.target.blur?.();return;}
       if (typing) return;
@@ -3814,10 +3850,10 @@ export default function Transcriber() {
           <div className="logo">T</div>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input className="docname" value={projectName}
+              <input className="docname" value={projectName} readOnly={sharedReadOnly} maxLength={300}
                 onChange={(e) => setProjectName(e.target.value)} spellCheck={false} />
               <span className="saved">
-                {saved === "saving" ? "Saving…" : saved === "error" ? "Save failed" : "All changes saved"}
+                {saved === "saving" ? "Saving on this device…" : saved === "error" ? "Device save failed" : collaboration.target ? "Saved on this device" : "All changes saved"}
               </span>
             </div>
             <div className="menus">
@@ -3836,10 +3872,7 @@ export default function Transcriber() {
             {envKeys.workspaceProtected && <form method="post" action="/auth/logout" style={{ margin: 0 }}>
               <button className="btn sm" type="submit">Sign out</button>
             </form>}
-            <div style={{ display: "flex" }}>
-              <div className="av" style={{ background: "#1A73E8" }}>MK</div>
-              <div className="av" style={{ background: "#C4456B", marginLeft: -8 }}>JT</div>
-            </div>
+            <Collaboration collaboration={collaboration} media={media} fileFor={id => fileStore.current.get(id)} onUploaded={onSharedUpload} onBackup={exportProjectFile} />
             <button className="share" onClick={() => exportSubs("srt")}>
               <Download size={13} /> Export
             </button>
@@ -4438,7 +4471,7 @@ export default function Transcriber() {
                   </div>
                   <div className="fld">
                     <button className={`btn sm${prime ? " pri" : ""}`} style={{ width: "100%", justifyContent: "center" }}
-                      onClick={() => setPrime((v) => !v)}>
+                      disabled={sharedReadOnly} onClick={() => setPrime((v) => !v)}>
                       {prime ? "Priming on" : "Priming off"}
                     </button>
                   </div>
@@ -4811,7 +4844,7 @@ export default function Transcriber() {
                     offline and ask to be relinked from the Media Pool.
                   </div>
                   <div className="fld">
-                    <button className="btn sm" style={{ width: "100%", justifyContent: "center" }}
+                    <button className="btn sm" disabled={!!collaboration.target} style={{ width: "100%", justifyContent: "center" }}
                       onClick={async () => {
                         if (!window.confirm("Discard the saved project and start clean?")) return;
                         await clearProject();
@@ -4940,7 +4973,7 @@ export default function Transcriber() {
             {menu === "file" && (<>
               <button disabled={projectImportBusy} onClick={() => { exportProjectFile(); setMenu(null); }}>
                 <Download size={14} /> Export Project JSON</button>
-              <button disabled={projectImportBusy || ai.busy || tr.busy || clipFind.busy || !!job} onClick={() => { projectFileInput.current?.click(); setMenu(null); }}>
+              <button disabled={!!collaboration.target || projectImportBusy || ai.busy || tr.busy || clipFind.busy || !!job} onClick={() => { projectFileInput.current?.click(); setMenu(null); }}>
                 <Upload size={14} /> Import Project JSON</button>
               <div className="sep" />
               <button onClick={() => { setModal({ kind: "pool" }); setMenu(null); }}>
@@ -4953,7 +4986,7 @@ export default function Transcriber() {
               <button onClick={() => { exportSubs("vtt"); setMenu(null); }}>
                 <Download size={14} /> Export subtitles (VTT)</button>
               <div className="sep" />
-              <button onClick={async () => {
+              <button disabled={!!collaboration.target} onClick={async () => {
                 if (!window.confirm("Discard the saved project and start clean?")) return;
                 await clearProject(); window.location.reload();
               }}><Trash2 size={14} /> Clear saved project</button>
@@ -5172,7 +5205,7 @@ export default function Transcriber() {
       )}
 
       {modal?.kind === "dict" && (
-        <DictionaryModal tab={modal.tab} dict={dict} onChange={setDict}
+        <DictionaryModal tab={modal.tab} dict={dict} onChange={change => { if (!sharedReadOnly) setDict(change); }}
           onClose={() => setModal(null)} />
       )}
 
@@ -5868,7 +5901,8 @@ const sliceWav = (samples, from, to, rate = 16000) =>
  * "offline" and ask to be relinked, the way an NLE handles missing media.
  * Everything else (words, cues, story, EDL) survives.
  */
-const DB = "transcriber", STORE = "projects", KEY = "current";
+const CACHE_TARGET = sharedTarget();
+const DB = "transcriber", STORE = "projects", KEY = CACHE_TARGET ? `shared:${CACHE_TARGET.id}:${CACHE_TARGET.key}` : "current";
 
 function idb() {
   return new Promise((res, rej) => {

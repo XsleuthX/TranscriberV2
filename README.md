@@ -1,4 +1,10 @@
-# Transcriber v2.40 - exact Story ranges
+# Transcriber v2.41 - shared projects
+
+**Share project** creates a server-backed copy with editor/viewer links, live
+presence, edit syncing, conflict review and optional shared footage. It uses
+the existing workspace sign-in. Local projects remain available separately.
+See [collaboration setup and usage](COLLABORATION.md), including persistent
+storage and single-instance hosting requirements.
 
 This build adds functional multi-source timeline playback and signed-in Iconik
 asset import to the supplied v2.25 React app. It retains the prior import, Story, model, hosting, cancellation and text-editing fixes. This release also fixes Story-card text deletion crashes and keeps AI reviews running past invalid flags or malformed response batches.
@@ -362,7 +368,8 @@ are included in the release. CI runs the complete suite on the production server
 See [DEPLOYMENT.md](DEPLOYMENT.md) for GitHub setup and hosting instructions.
 The included production server and Dockerfile serve the complete app at one
 address with a workspace password. GitHub Pages alone cannot run media/API
-routes. Keep Vite development/preview servers local. Projects remain browser-local.
+routes. Keep Vite development/preview servers local. Local projects stay in the
+browser; explicitly shared projects persist on the server.
 
 The archive excludes credentials, node_modules, and test media.
 

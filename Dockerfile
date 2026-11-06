@@ -18,6 +18,8 @@ COPY server ./server
 # The server imports shared modules from src, including the DeepSeek model catalog.
 # Keep the complete source dependency tree in the runtime image.
 COPY --from=build /app/src ./src
+RUN mkdir -p /app/data && chown node:node /app/data
+ENV COLLAB_DATA_DIR=/app/data/collaboration
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

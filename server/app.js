@@ -7,8 +7,9 @@ import { iconikMiddleware } from './iconik.js';
 import { mediaMiddleware } from './media.js';
 import { providerMiddleware } from './providers.js';
 import { sameOrigin, json, readBody } from './access.js';
+import { collaborationMiddleware } from './collaboration.js';
 
-const loginPage = (failed = false) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Sign in · Transcriber</title><style>body{background:#eef1f5;font:16px system-ui;color:#24313d;margin:0;display:grid;min-height:100vh;place-items:center}main{background:white;padding:36px;border-radius:12px;width:min(360px,80vw)}input,button{box-sizing:border-box;padding:12px;width:100%;margin-top:12px;font:inherit}button{background:#267181;color:white;border:0;border-radius:5px}</style><main><h1>Transcriber</h1><p>Enter your workspace password to continue.</p>${failed ? '<p role="alert">Sign-in failed. Try again shortly.</p>' : ''}<form method="post" action="/auth/login"><label>Workspace password<input type="password" name="password" required autocomplete="current-password" maxlength="256"></label><button>Sign in</button></form></main></html>`;
+const loginPage = (failed = false) => `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Sign in · Transcriber</title><style>body{background:#eef1f5;font:16px system-ui;color:#24313d;margin:0;display:grid;min-height:100vh;place-items:center}main{background:white;padding:36px;border-radius:12px;width:min(360px,80vw)}input,button{box-sizing:border-box;padding:12px;width:100%;margin-top:12px;font:inherit}button{background:#267181;color:white;border:0;border-radius:5px}</style><main><h1>Transcriber</h1><p>Enter your workspace password to continue.</p>${failed ? '<p role="alert">Sign-in failed. Try again shortly.</p>' : ''}<form method="post" action="/auth/login"><label>Workspace password<input type="password" name="password" required autocomplete="current-password" maxlength="256"></label><button>Sign in</button></form></main><script>document.querySelector("form").addEventListener("submit",()=>{if(location.hash)sessionStorage.setItem("transcriber.returnHash",location.hash)})</script></html>`;
 export function createAppServer(env = {}, options = {}) {
   const hosted = env.NODE_ENV === 'production';
   if (hosted && (!env.APP_PASSWORD || env.APP_PASSWORD.length < 16 || !env.APP_ORIGIN))
@@ -22,7 +23,8 @@ export function createAppServer(env = {}, options = {}) {
   const dist = path.resolve(options.dist || 'dist'), sessions = new Map();
   const salt = randomBytes(16), passwordHash = env.APP_PASSWORD ? scryptSync(env.APP_PASSWORD, salt, 32) : null;
   const failures = []; // One shared workspace; bound login attempts without trusting proxy headers.
-  const middleware = [mediaMiddleware(env), iconikMiddleware(env, options.iconik), providerMiddleware(env, options.providers)];
+  const collaboration = collaborationMiddleware(env);
+  const middleware = [mediaMiddleware(env), iconikMiddleware(env, options.iconik), providerMiddleware(env, options.providers), collaboration];
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY'); res.setHeader('Cache-Control', 'no-store');
@@ -75,6 +77,6 @@ export function createAppServer(env = {}, options = {}) {
     } catch (error) { if (!res.headersSent) json(res, error.status || 500, { error: 'The server could not complete this request.' }); else res.destroy(); }
   });
   server.requestTimeout = 30 * 60 * 1000;
-  server.once('close', () => void middleware[0].close());
+  server.once('close', () => { void middleware[0].close(); collaboration.close(); });
   return server;
 }

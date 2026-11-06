@@ -1,4 +1,4 @@
-# Host Transcriber v2.34
+# Host Transcriber v2.41
 
 The source repository is https://github.com/XsleuthX/TranscriberV2.
 Deploy this app to one Node/container service. A hosting provider has not yet been selected.
@@ -31,6 +31,8 @@ Set these **runtime environment variables in the hosting service**:
 | `PORT` | Port assigned by the host; default 3000 |
 | `APP_ORIGIN` | Exact public HTTPS origin, e.g. `https://transcriber.example.com`, without a trailing slash |
 | `APP_PASSWORD` | A unique workspace password, at least 16 characters |
+| `COLLAB_DATA_DIR` | Persistent writable directory for shared projects and uploaded media; Docker default `/app/data/collaboration` |
+| `COLLAB_MAX_MEDIA_BYTES` | Optional maximum shared upload size; default 2147483648 bytes (2 GiB) |
 | `OPENAI_API_KEY` | Optional server key; users may instead enter a session key in the app |
 | `ICONIK_AUTH_TOKEN`, `ICONIK_APP_ID` | Optional shared workspace integration credentials; users can instead connect in Media Pool |
 
@@ -50,8 +52,8 @@ Use `/healthz` for the host health check.
 ## Try the container locally
 
 ```powershell
-docker build -t transcriber:2.34 .
-docker run --rm -p 3000:3000 --env-file .env transcriber:2.34
+docker build -t transcriber:2.41 .
+docker run --rm -p 3000:3000 --env-file .env -v transcriber-data:/app/data transcriber:2.41
 ```
 
 For that local test, set `APP_ORIGIN=http://localhost:3000` and a workspace
@@ -71,18 +73,24 @@ The Dockerfile enables production mode and includes FFmpeg.
 
 ## Persistence and current scope
 
-Projects still autosave in **each browser's IndexedDB**. Moving to another origin,
+Local projects autosave in **each browser's IndexedDB**. Moving to another origin,
 browser, or computer does not transfer that project. Export a project backup
 before moving from the local app to the hosted URL, then import it there. Local
 video playback needs relinking after reload; short decoded audio may remain in
 the browser cache. Transcripts, story references, and timeline edits persist.
 
-This is a private workspace release, not a multi-user collaboration service.
-It has no account management, cloud project database, shared media library,
-durable extraction queue, or autoscaling. Restarting the server expires login
-and Iconik sessions and interrupts unfinished jobs; reconnect/reimport afterward.
-Use one instance until those features are added. Server-side Iconik credentials
-are shared by people with the workspace password.
+**Share project** explicitly creates a shared project with editor/viewer links,
+live presence, revision-checked edits and optional shared media. These projects
+and their uploaded footage persist in `COLLAB_DATA_DIR`; mount durable storage
+and back up this directory. See [COLLABORATION.md](COLLABORATION.md) for access,
+conflict resolution, upload/proxy settings and storage limits.
+
+Use exactly one process/instance: project transactions use in-process locks.
+There are no individual accounts, distributed database, durable extraction queue
+or autoscaling. Restarting expires login and Iconik sessions and interrupts
+unfinished jobs; reconnect/reimport afterward. Shared project data and footage
+survive when their data directory is on persistent storage. Server-side Iconik
+credentials are shared by people with the workspace password.
 
 The CI/container files have been prepared locally. GitHub Actions execution,
 the Docker image, HTTPS reverse-proxy behavior, and your live Iconik/OpenAI

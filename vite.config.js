@@ -3,11 +3,12 @@ import react from '@vitejs/plugin-react';
 import { iconikPlugin } from './server/iconik.js';
 import { mediaMiddleware } from './server/media.js';
 import { providerMiddleware } from './server/providers.js';
+import { collaborationMiddleware } from './server/collaboration.js';
 function apiPlugin(env) {
-  const media = mediaMiddleware(env), providers = providerMiddleware(env);
+  const media = mediaMiddleware(env), providers = providerMiddleware(env), collaboration = collaborationMiddleware(env);
   const setup = server => {
-    server.middlewares.use(media); server.middlewares.use(providers);
-    server.httpServer?.once('close', () => void media.close());
+    server.middlewares.use(media); server.middlewares.use(providers); server.middlewares.use(collaboration);
+    server.httpServer?.once('close', () => { void media.close(); collaboration.close(); });
   };
   return { name: 'transcriber-api', configureServer: setup, configurePreviewServer: setup };
 }
