@@ -1,7 +1,7 @@
 {
   "name": "transcriber",
   "private": true,
-  "version": "2.41.0",
+  "version": "2.42.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/run.mjs dev",
@@ -24,7 +24,8 @@
     "test:batch-media-browser": "node tests/batch-media-browser.mjs",
     "test:story-layout-browser": "node tests/story-layout-browser.mjs",
     "test:story-range-browser": "node tests/story-range-browser.mjs",
-    "test:collaboration-browser": "node tests/collaboration-browser.mjs"
+    "test:collaboration-browser": "node tests/collaboration-browser.mjs",
+    "test:collaboration-visible-browser": "node tests/collaboration-visible-browser.mjs"
   },
   "dependencies": {
     "ffmpeg-static": "^5.3.0",

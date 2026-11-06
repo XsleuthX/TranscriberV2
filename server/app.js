@@ -23,7 +23,7 @@ export function createAppServer(env = {}, options = {}) {
   const dist = path.resolve(options.dist || 'dist'), sessions = new Map();
   const salt = randomBytes(16), passwordHash = env.APP_PASSWORD ? scryptSync(env.APP_PASSWORD, salt, 32) : null;
   const failures = []; // One shared workspace; bound login attempts without trusting proxy headers.
-  const collaboration = collaborationMiddleware(env);
+  const collaboration = collaborationMiddleware(env, options.collaboration);
   const middleware = [mediaMiddleware(env), iconikMiddleware(env, options.iconik), providerMiddleware(env, options.providers), collaboration];
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');

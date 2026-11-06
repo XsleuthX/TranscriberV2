@@ -47,6 +47,7 @@ jobs:
           npm run test:story-layout-browser
           npm run test:assembly-browser
           npm run test:collaboration-browser
+          npm run test:collaboration-visible-browser
       - name: Build deployment image
         run: docker build -t transcriber:verified .
       - name: Start and verify production container

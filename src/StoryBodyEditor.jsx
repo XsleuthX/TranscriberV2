@@ -37,7 +37,7 @@ export default function StoryBodyEditor({ lines, text, onCommit, onPreview, onSe
     el.addEventListener('beforeinput', before);
     return () => el.removeEventListener('beforeinput', before);
   }, []);
-  return <div ref={element} className="dbody" contentEditable suppressContentEditableWarning
+  return <div ref={element} className="dbody" data-collab-field="body" contentEditable suppressContentEditableWarning
     data-ph="Transcript, VO, graphics or B-roll instruction"
     onClick={event => {
       event.stopPropagation(); onSelect();

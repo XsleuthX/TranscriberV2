@@ -1,4 +1,11 @@
-# Transcriber v2.41 - shared projects
+# Transcriber v2.42 - visible collaboration and comments
+
+The **Live collaboration** strip shows participant colours and their current
+workspace. Click a participant to locate their selection. Transcript, Subtitle
+and Story support coloured text selections/carets; Timeline and Multi-Timeline
+show selected clips, ranges and playheads. **Add comment** anchors a floating
+thread to your selection, with replies, @mentions, action owners and Resolve/Reopen.
+**Comments → For me** collects your mentions and assigned actions.
 
 **Share project** creates a server-backed copy with editor/viewer links, live
 presence, edit syncing, conflict review and optional shared footage. It uses
@@ -15,7 +22,7 @@ Open Transcript or Subtitle and click **Vet**. Use inline Apply/Dismiss, Previou
 
 **Vet settings → Team rules** parses explicit correction comments, retains ambiguous notes for manual review, supports literal replacement/deletion and case/whole-word options, and reports remaining matches. Rules import/export as JSON. **Apply shown…** previews the selected category before a bulk transaction. Stale/overlapping/unsafe shared-word edits are skipped. Undo restores text and review decisions. **History** downloads a review report.
 
-Reviews follow the active source and A/B track; Dual Sub has an explicit Vet track selector. Applying Sub A corrections updates Transcript prose and preserves cue IDs/times, Sub B text, source clip references and Story linkage. Changed word timing is marked estimated. Rules, decisions, notes and history are included in autosave and project JSON. UTF-8 and BOM-tagged UTF-16 subtitle imports are supported. Team rules belong to the local project; they are not a shared cloud review service.
+Reviews follow the active source and A/B track; Dual Sub has an explicit Vet track selector. Applying Sub A corrections updates Transcript prose and preserves cue IDs/times, Sub B text, source clip references and Story linkage. Changed word timing is marked estimated. Rules, decisions, notes and history are included in autosave and project JSON. UTF-8 and BOM-tagged UTF-16 subtitle imports are supported. Team rules belong to the project and synchronize when it is explicitly shared.
 
 ## Transcription changes retained from v2.33
 
